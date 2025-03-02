@@ -1,5 +1,8 @@
 package main
 
+import "go-progira/internal/application/scrapper"
+
 func main() {
-	// TODO: write your code here
+	scr := scrapper.Server{}
+	scr.Start()
 }
