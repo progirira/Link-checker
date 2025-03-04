@@ -27,7 +27,7 @@ func CheckStackOverflowUpdates(url string) (string, error) {
 	defer response.Body.Close()
 
 	if response.StatusCode != 200 {
-		return "", fmt.Errorf("Stack Overflow API error: %s", response.Status)
+		return "", fmt.Errorf("stack Overflow API error: %s", response.Status)
 	}
 
 	body, err := io.ReadAll(response.Body)

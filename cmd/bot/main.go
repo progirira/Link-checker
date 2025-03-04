@@ -10,7 +10,6 @@ import (
 	"log"
 	"os"
 	"strings"
-	"time"
 )
 
 func loadEnv(filename string) error {
@@ -45,23 +44,13 @@ func loadEnv(filename string) error {
 	return scanner.Err()
 }
 
-func token() (string, error) {
-	token, exists := os.LookupEnv("TELEGRAM_BOT_API_TOKEN")
+func getByKeyFromEnv(key string) (string, error) {
+	val, exists := os.LookupEnv(key)
 	if !exists {
-		log.Print("No TELEGRAM_BOT_API_TOKEN in .env file found")
-		return token, ErrNoToken
+		log.Print(fmt.Sprintf("No %s in .env file found", key))
+		return val, ErrNoVal
 	}
-
-	return token, nil
-}
-
-func botHost() (string, error) {
-	host, exists := os.LookupEnv("BOT_HOST")
-	if !exists {
-		log.Print("No BOT_HOST in .env file found")
-		return host, ErrNoBotHost
-	}
-	return host, nil
+	return val, nil
 }
 
 func main() {
@@ -72,27 +61,28 @@ func main() {
 		return
 	}
 
-	token, err := token()
-	if errors.Is(err, ErrNoToken) {
+	token, err := getByKeyFromEnv("TELEGRAM_BOT_API_TOKEN")
+	if errors.Is(err, ErrNoVal) {
 		fmt.Println(err.Error())
 		return
 	}
 
-	host, err := botHost()
-	if errors.Is(err, ErrNoToken) {
+	host, err := getByKeyFromEnv("BOT_HOST")
+	if errors.Is(err, ErrNoVal) {
 		fmt.Println(err.Error())
 		return
 	}
 
 	tgClient := clients.NewTelegramClient(host, token)
-	baseURL := ""
-	scrapClient := clients.NewScrapperClient(3*time.Second, baseURL)
+
+	host = "http://localhost:8090"
+	scrapClient := clients.NewScrapperClient(host)
+
+	manager := processing.NewManager(tgClient, scrapClient)
+	manager.Start()
 
 	botServer := bot.Server{
 		TgClient: tgClient,
 	}
 	botServer.Start()
-
-	manager := processing.NewManager(tgClient, scrapClient)
-	manager.Start()
 }

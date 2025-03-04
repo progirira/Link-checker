@@ -52,6 +52,7 @@ func sendErrorResponse(w http.ResponseWriter, desc, code, exceptionName, excepti
 
 	w.WriteHeader(http.StatusBadRequest)
 	w.Header().Set("Content-Type", "application/json")
+
 	if err := json.NewEncoder(w).Encode(apiError); err != nil {
 		log.Println("Error encoding error response:", err)
 	}

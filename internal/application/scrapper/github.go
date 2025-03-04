@@ -25,7 +25,7 @@ func CheckGitHubUpdates(repoName string) (string, error) {
 	defer response.Body.Close()
 
 	if response.StatusCode != 200 {
-		fmt.Println("GitHub API error: %s", response.Status)
+		fmt.Printf("GitHub API error: %s", response.Status)
 		return "", fmt.Errorf("GitHub API error: %s", response.Status)
 	}
 

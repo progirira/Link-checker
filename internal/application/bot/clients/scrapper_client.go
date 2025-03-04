@@ -1,90 +1,67 @@
 package clients
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	scrappertypes "go-progira/internal/domain/types/scrapper_types"
 	"net/http"
-	"time"
+	"net/url"
 )
 
 type ScrapperClient struct {
-	client  http.Client
-	Timeout time.Duration
-	BaseURL string
+	client http.Client
+	host   string
 }
 
-func NewScrapperClient(timeout time.Duration, baseURL string) ScrapperClient {
+func NewScrapperClient(host string) ScrapperClient {
 	return ScrapperClient{
-		client:  http.Client{},
-		Timeout: timeout,
-		BaseURL: baseURL,
+		client: http.Client{},
+		host:   host,
 	}
 }
+
+//func (c *ScrapperClient) createURLString(p string) string {
+//	return path.Join(c.BaseURL, p)
+//}
 
 func (c *ScrapperClient) RegisterChat(id int64) error {
-	path := fmt.Sprintf("%s/tg-chat/%d", c.BaseURL, id)
-
-	response, err := http.Post(path, "application/json", nil)
-	if err != nil {
-		return err
-	}
-	defer response.Body.Close()
-
-	if response.StatusCode != http.StatusOK {
-		return fmt.Errorf("error registering chat: %s", response.Status)
-	}
-
-	return nil
+	return c.doWithChat(http.MethodPost, id, "error registering chat: %s")
 }
 
 func (c *ScrapperClient) DeleteChat(id int64) error {
-	url := fmt.Sprintf("%s/tg-chat/%d", c.BaseURL, id)
+	return c.doWithChat(http.MethodDelete, id, "error deleting chat: %s")
+}
 
-	req, err := http.NewRequest(http.MethodDelete, url, http.NoBody)
+func (c *ScrapperClient) doWithChat(method string, id int64, debugMes string) error {
+	u := fmt.Sprintf("/tg-chat/%d", id)
+
+	_, err := DoRequest(c.client, method, c.host, u, url.Values{}, nil)
 	if err != nil {
+		fmt.Println(debugMes)
 		return err
-	}
-
-	response, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer response.Body.Close()
-
-	if response.StatusCode != http.StatusOK {
-		return fmt.Errorf("error deleting chat: %s", response.Status)
 	}
 
 	return nil
 }
 
 func (c *ScrapperClient) GetLinks(chatID int64) (*scrappertypes.ListLinksResponse, error) {
-	url := fmt.Sprintf("%s/links", c.BaseURL)
+	u := fmt.Sprintf("/links")
+	fmt.Println("GetLinks ScrapClient")
 
-	req, err := http.NewRequest(http.MethodGet, url, http.NoBody)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Tg-Chat-Id", fmt.Sprintf("%d", chatID))
+	q := url.Values{}
+	q.Add("Tg-Chat-Id", fmt.Sprintf("%d", chatID))
 
-	response, err := http.DefaultClient.Do(req)
+	responseBody, err := DoRequest(c.client, http.MethodGet, c.host, u, q, nil)
 
 	if err != nil {
 		return nil, err
-	}
-	defer response.Body.Close()
-
-	if response.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("error getting links: %s", response.Status)
 	}
 
 	var linksResponse scrappertypes.ListLinksResponse
-	if err := json.NewDecoder(response.Body).Decode(&linksResponse); err != nil {
+	if err := json.NewDecoder(responseBody).Decode(&linksResponse); err != nil {
 		return nil, err
 	}
-
+	fmt.Println(&linksResponse)
 	return &linksResponse, nil
 }
 
@@ -94,7 +71,7 @@ func (c *ScrapperClient) AddLink(chatID int64, request scrappertypes.AddLinkRequ
 		return nil, err
 	}
 
-	return c.changeLink(http.MethodPost, chatID, body)
+	return c.doWithLink(http.MethodPost, chatID, body)
 }
 
 func (c *ScrapperClient) RemoveLink(chatID int64, request scrappertypes.RemoveLinkRequest) (*scrappertypes.LinkResponse, error) {
@@ -103,31 +80,26 @@ func (c *ScrapperClient) RemoveLink(chatID int64, request scrappertypes.RemoveLi
 		return nil, err
 	}
 
-	return c.changeLink(http.MethodDelete, chatID, body)
+	return c.doWithLink(http.MethodDelete, chatID, body)
 }
 
-func (c *ScrapperClient) changeLink(method string, chatID int64, body []byte) (*scrappertypes.LinkResponse, error) {
-	url := fmt.Sprintf("%s/links", c.BaseURL)
+func (c *ScrapperClient) doWithLink(method string, chatID int64, body []byte) (*scrappertypes.LinkResponse, error) {
+	u := "/links"
 
-	req, err := http.NewRequest(method, url, bytes.NewBuffer(body))
+	//req, err := http.NewRequest(method, url, bytes.NewBuffer(body))
+
+	q := url.Values{}
+	q.Add("Tg-Chat-Id", fmt.Sprintf("%d", chatID))
+	q.Add("Content-Type", "application/json")
+
+	responseBody, err := DoRequest(c.client, method, c.host, u, q, body)
+
 	if err != nil {
 		return nil, err
-	}
-	req.Header.Set("Tg-Chat-Id", fmt.Sprintf("%d", chatID))
-	req.Header.Set("Content-Type", "application/json")
-
-	response, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer response.Body.Close()
-
-	if response.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("error removing link: %s", response.Status)
 	}
 
 	var linkResponse scrappertypes.LinkResponse
-	if err := json.NewDecoder(response.Body).Decode(&linkResponse); err != nil {
+	if err := json.NewDecoder(responseBody).Decode(&linkResponse); err != nil {
 		return nil, err
 	}
 

@@ -14,7 +14,7 @@ import (
 type Server struct {
 	chats     map[int64]*scrappertypes.Chat // Хранение чатов в памяти
 	chatMutex sync.Mutex                    // Мьютекс для защиты доступа к мапе чатов
-	botClient http.Client
+	botClient BotClient
 }
 
 func (s *Server) Start() {
@@ -36,19 +36,21 @@ func (s *Server) monitorLinks() {
 
 	for _, chat := range s.chats {
 		for _, link := range chat.Links {
-
 			var currentVersion string
-			if IsStackOverflowURL(link.URL) {
+
+			switch IsStackOverflowURL(link.URL) {
+			case true:
 				currentVersion, _ = CheckStackOverflowUpdates(link.URL)
-			} else if IsGitHubURL(link.URL) {
-				currentVersion, _ = CheckGitHubUpdates(link.URL)
-			} else {
+			case false:
+				if IsGitHubURL(link.URL) {
+					currentVersion, _ = CheckGitHubUpdates(link.URL)
+				}
+			default:
 				fmt.Println("не гитхаб и не стековерфлоу")
 			}
 
-			//currentVersion := checkForChanges(link)
 			if currentVersion != link.LastVersion {
-				fmt.Println("Changes detected for link %s\n", link.URL)
+				fmt.Printf("Changes detected for link %s\n", link.URL)
 				link.LastVersion = currentVersion
 				link.LastChecked = time.Now()
 			}
@@ -57,7 +59,6 @@ func (s *Server) monitorLinks() {
 }
 
 func (s *Server) startScheduler() {
-	// инициализируем объект планировщика
 	sc := gocron.NewScheduler(time.UTC)
 
 	task := s.monitorLinks
@@ -95,6 +96,7 @@ func (s *Server) ChatHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) RegisterChat(w http.ResponseWriter, r *http.Request) {
+	fmt.Println("register")
 	idStr := r.URL.Path[len("/tg-chat/"):]
 
 	id, err := strconv.ParseInt(idStr, 10, 64)
@@ -112,6 +114,7 @@ func (s *Server) RegisterChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.chats[id] = &scrappertypes.Chat{ID: id, Links: []scrappertypes.LinkResponse{}}
+
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -137,7 +140,10 @@ func (s *Server) DeleteChat(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) GetLinks(w http.ResponseWriter, r *http.Request) {
+
+	fmt.Println("In Get Links Server")
 	chatIDStr := r.Header.Get("Tg-Chat-Id")
+
 	chatID, err := strconv.ParseInt(chatIDStr, 10, 64)
 	if err != nil || chatID <= 0 {
 		http.Error(w, "Invalid chat ID", http.StatusBadRequest)
@@ -154,6 +160,7 @@ func (s *Server) GetLinks(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response := scrappertypes.ListLinksResponse{Links: chat.Links, Size: int32(len(chat.Links))}
+
 	w.Header().Set("Content-Type", "application/json")
 
 	err = json.NewEncoder(w).Encode(response)
@@ -163,6 +170,8 @@ func (s *Server) GetLinks(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) AddLink(w http.ResponseWriter, r *http.Request) {
+	fmt.Println("In Add Links Server")
+
 	chatIDStr := r.Header.Get("Tg-Chat-Id")
 	chatID, err := strconv.ParseInt(chatIDStr, 10, 64)
 	if err != nil || chatID <= 0 {
@@ -191,10 +200,21 @@ func (s *Server) AddLink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	chat.Links = append(chat.Links, link)
+	if !s.isURLInAdded(link.ID, link.URL) {
+		chat.Links = append(chat.Links, link)
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(link)
+}
+
+func (s *Server) isURLInAdded(id int64, u string) bool {
+	for _, l := range s.chats[id].Links {
+		if l.URL == u {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) RemoveLink(w http.ResponseWriter, r *http.Request) {

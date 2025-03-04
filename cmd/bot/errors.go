@@ -2,5 +2,4 @@ package main
 
 import "errors"
 
-var ErrNoToken = errors.New("token is not specified")
-var ErrNoBotHost = errors.New("bot host is not specified")
+var ErrNoVal = errors.New("value is not specified in .env file")
