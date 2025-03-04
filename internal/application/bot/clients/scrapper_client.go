@@ -10,19 +10,17 @@ import (
 
 type ScrapperClient struct {
 	client http.Client
+	scheme string
 	host   string
 }
 
-func NewScrapperClient(host string) ScrapperClient {
+func NewScrapperClient(scheme, host string) ScrapperClient {
 	return ScrapperClient{
 		client: http.Client{},
+		scheme: scheme,
 		host:   host,
 	}
 }
-
-//func (c *ScrapperClient) createURLString(p string) string {
-//	return path.Join(c.BaseURL, p)
-//}
 
 func (c *ScrapperClient) RegisterChat(id int64) error {
 	return c.doWithChat(http.MethodPost, id, "error registering chat: %s")
@@ -35,7 +33,7 @@ func (c *ScrapperClient) DeleteChat(id int64) error {
 func (c *ScrapperClient) doWithChat(method string, id int64, debugMes string) error {
 	u := fmt.Sprintf("/tg-chat/%d", id)
 
-	_, err := DoRequest(c.client, method, c.host, u, url.Values{}, nil)
+	_, err := DoRequest(c.client, method, "http", c.host, u, url.Values{}, nil)
 	if err != nil {
 		fmt.Println(debugMes)
 		return err
@@ -46,23 +44,21 @@ func (c *ScrapperClient) doWithChat(method string, id int64, debugMes string) er
 
 func (c *ScrapperClient) GetLinks(chatID int64) (*scrappertypes.ListLinksResponse, error) {
 	u := fmt.Sprintf("/links")
-	fmt.Println("GetLinks ScrapClient")
 
 	q := url.Values{}
 	q.Add("Tg-Chat-Id", fmt.Sprintf("%d", chatID))
 
-	responseBody, err := DoRequest(c.client, http.MethodGet, c.host, u, q, nil)
+	responseBody, err := DoRequest(c.client, http.MethodGet, c.scheme, c.host, u, q, nil)
 
 	if err != nil {
 		return nil, err
 	}
 
-	var linksResponse scrappertypes.ListLinksResponse
-	if err := json.NewDecoder(responseBody).Decode(&linksResponse); err != nil {
+	var listResp scrappertypes.ListLinksResponse
+	if err := json.NewDecoder(responseBody).Decode(&listResp); err != nil {
 		return nil, err
 	}
-	fmt.Println(&linksResponse)
-	return &linksResponse, nil
+	return &listResp, nil
 }
 
 func (c *ScrapperClient) AddLink(chatID int64, request scrappertypes.AddLinkRequest) (*scrappertypes.LinkResponse, error) {
@@ -86,13 +82,11 @@ func (c *ScrapperClient) RemoveLink(chatID int64, request scrappertypes.RemoveLi
 func (c *ScrapperClient) doWithLink(method string, chatID int64, body []byte) (*scrappertypes.LinkResponse, error) {
 	u := "/links"
 
-	//req, err := http.NewRequest(method, url, bytes.NewBuffer(body))
-
 	q := url.Values{}
 	q.Add("Tg-Chat-Id", fmt.Sprintf("%d", chatID))
 	q.Add("Content-Type", "application/json")
 
-	responseBody, err := DoRequest(c.client, method, c.host, u, q, body)
+	responseBody, err := DoRequest(c.client, method, c.scheme, c.host, u, q, body)
 
 	if err != nil {
 		return nil, err
@@ -100,6 +94,7 @@ func (c *ScrapperClient) doWithLink(method string, chatID int64, body []byte) (*
 
 	var linkResponse scrappertypes.LinkResponse
 	if err := json.NewDecoder(responseBody).Decode(&linkResponse); err != nil {
+		fmt.Println("error unmarshalling response")
 		return nil, err
 	}
 

@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
-	"go-progira/internal/application/bot"
 	"go-progira/internal/application/bot/clients"
 	"go-progira/internal/application/bot/processing"
 	"log"
@@ -73,16 +72,11 @@ func main() {
 		return
 	}
 
-	tgClient := clients.NewTelegramClient(host, token)
+	tgClient := clients.NewTelegramClient("https", host, token)
 
-	host = "http://localhost:8090"
-	scrapClient := clients.NewScrapperClient(host)
+	host = "localhost:8090"
+	scrapClient := clients.NewScrapperClient("http", host)
 
 	manager := processing.NewManager(tgClient, scrapClient)
 	manager.Start()
-
-	botServer := bot.Server{
-		TgClient: tgClient,
-	}
-	botServer.Start()
 }

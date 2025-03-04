@@ -2,23 +2,24 @@ package clients
 
 import (
 	"bytes"
+	"fmt"
 	"go-progira/lib/e"
 	"io"
 	"net/http"
 	"net/url"
-	"path"
 )
 
-func DoRequest(client http.Client, method, host, basePath string, query url.Values, body []byte) (io.ReadCloser, error) {
+func DoRequest(client http.Client, method, scheme, host, path string, query url.Values, body []byte) (io.ReadCloser, error) {
 	const errMsg = "can't do request"
 
 	u := url.URL{
-		Scheme: "https",
+		Scheme: scheme,
 		Host:   host,
-		Path:   path.Join(basePath, method),
+		Path:   path,
 	}
+	fmt.Println(u)
 
-	req, err := http.NewRequest(http.MethodGet, u.String(), bytes.NewBuffer(body))
+	req, err := http.NewRequest(method, u.String(), bytes.NewBuffer(body))
 	if err != nil {
 		return nil, e.Wrap(errMsg, err)
 	}

@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"path"
 	"strconv"
 )
 
@@ -19,13 +20,15 @@ type MyClient interface {
 }
 
 type TelegramClient struct {
+	scheme   string
 	host     string
 	basePath string
 	client   http.Client
 }
 
-func NewTelegramClient(host, token string) TelegramClient {
+func NewTelegramClient(scheme, host, token string) TelegramClient {
 	return TelegramClient{
+		scheme:   scheme,
 		host:     host,
 		basePath: newBasePath(token),
 		client:   http.Client{},
@@ -41,11 +44,8 @@ func (c *TelegramClient) Updates(offset, limit int) ([]byte, error) {
 	q.Add("offset", strconv.Itoa(offset))
 	q.Add("limit", strconv.Itoa(limit))
 
-	body, err := DoRequest(c.client, getUpdatesMethod, c.host, c.basePath, q, nil)
+	body, err := DoRequest(c.client, http.MethodGet, c.scheme, c.host, path.Join(c.basePath, getUpdatesMethod), q, nil)
 	data, _ := io.ReadAll(body)
-
-	//fmt.Println("Get response")
-	//fmt.Println(string(data))
 
 	if err != nil {
 		return nil, err
@@ -59,11 +59,10 @@ func (c *TelegramClient) SendMessage(chatID int, text string) error {
 	q.Add("chat_id", strconv.Itoa(chatID))
 	q.Add("text", text)
 
-	_, err := DoRequest(c.client, sendMessageMethod, c.host, c.basePath, q, nil)
+	_, err := DoRequest(c.client, http.MethodGet, c.scheme, c.host, path.Join(c.basePath, sendMessageMethod), q, nil)
 	if err != nil {
 		return e.Wrap("can't send message", err)
 	}
-	//fmt.Println("Sending message to ", chatID)
 
 	//if body != nil {
 	//	fmt.Printf("Response: %s\n", string(body))

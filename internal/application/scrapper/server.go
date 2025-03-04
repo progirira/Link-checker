@@ -12,22 +12,27 @@ import (
 )
 
 type Server struct {
-	chats     map[int64]*scrappertypes.Chat // Хранение чатов в памяти
-	chatMutex sync.Mutex                    // Мьютекс для защиты доступа к мапе чатов
-	botClient BotClient
+	chats     map[int64]*scrappertypes.Chat
+	chatMutex sync.Mutex
+}
+
+func NewServer() *Server {
+	return &Server{
+		chats:     make(map[int64]*scrappertypes.Chat),
+		chatMutex: sync.Mutex{},
+	}
 }
 
 func (s *Server) Start() {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/tg-chat/", s.ChatHandler)
-	mux.HandleFunc("/links", s.LinksHandler)
-
-	s.startScheduler()
+	http.HandleFunc("/tg-chat/{id}", s.ChatHandler)
+	http.HandleFunc("/links", s.LinksHandler)
 
 	fmt.Println("Starting server on :8090...")
 	if err := http.ListenAndServe(":8090", nil); err != nil {
 		fmt.Println("Server failed:", err)
 	}
+	s.startScheduler()
+
 }
 
 func (s *Server) monitorLinks() {
@@ -115,7 +120,9 @@ func (s *Server) RegisterChat(w http.ResponseWriter, r *http.Request) {
 
 	s.chats[id] = &scrappertypes.Chat{ID: id, Links: []scrappertypes.LinkResponse{}}
 
+	response := map[string]interface{}{"message": "Chat registered successfully", "id": id}
 	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(response)
 }
 
 func (s *Server) DeleteChat(w http.ResponseWriter, r *http.Request) {
@@ -136,13 +143,12 @@ func (s *Server) DeleteChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	delete(s.chats, id)
+
 	w.WriteHeader(http.StatusOK)
 }
 
 func (s *Server) GetLinks(w http.ResponseWriter, r *http.Request) {
-
-	fmt.Println("In Get Links Server")
-	chatIDStr := r.Header.Get("Tg-Chat-Id")
+	chatIDStr := r.URL.Query().Get("Tg-Chat-Id")
 
 	chatID, err := strconv.ParseInt(chatIDStr, 10, 64)
 	if err != nil || chatID <= 0 {
@@ -159,21 +165,21 @@ func (s *Server) GetLinks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	response := scrappertypes.ListLinksResponse{Links: chat.Links, Size: int32(len(chat.Links))}
+	response1 := scrappertypes.ListLinksResponse{Links: chat.Links, Size: int32(len(chat.Links))}
 
 	w.Header().Set("Content-Type", "application/json")
 
-	err = json.NewEncoder(w).Encode(response)
+	err = json.NewEncoder(w).Encode(response1)
 	if err != nil {
 		return
 	}
 }
 
 func (s *Server) AddLink(w http.ResponseWriter, r *http.Request) {
-	fmt.Println("In Add Links Server")
+	chatIDStr := r.URL.Query().Get("Tg-Chat-Id")
 
-	chatIDStr := r.Header.Get("Tg-Chat-Id")
 	chatID, err := strconv.ParseInt(chatIDStr, 10, 64)
+
 	if err != nil || chatID <= 0 {
 		http.Error(w, "Invalid chat ID", http.StatusBadRequest)
 		return
@@ -186,40 +192,52 @@ func (s *Server) AddLink(w http.ResponseWriter, r *http.Request) {
 	}
 
 	link := scrappertypes.LinkResponse{
-		ID:      int64(len(s.chats[chatID].Links) + 1), // Простой ID генератор
+		ID:      int64(len(s.chats[chatID].Links) + 1),
 		URL:     request.Link,
 		Tags:    request.Tags,
 		Filters: request.Filters,
 	}
+	fmt.Println(request.Link)
+	fmt.Println(link.URL)
 
 	s.chatMutex.Lock()
 	defer s.chatMutex.Unlock()
 	chat, exists := s.chats[chatID]
 	if !exists {
 		http.Error(w, "Chat not found.", http.StatusNotFound)
-		return
 	}
 
-	if !s.isURLInAdded(link.ID, link.URL) {
+	if !s.isURLInAdded(chatID, link.URL) {
 		chat.Links = append(chat.Links, link)
+		fmt.Println("Chat link added")
+		fmt.Println(s.chats[chatID].Links)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(link)
 }
 
 func (s *Server) isURLInAdded(id int64, u string) bool {
+	if s.chats[id].Links == nil {
+		s.chats[id].Links = []scrappertypes.LinkResponse{}
+	}
+
+	if len(s.chats[id].Links) == 0 {
+		return false
+	}
+
 	for _, l := range s.chats[id].Links {
 		if l.URL == u {
 			return true
 		}
 	}
+
 	return false
 }
 
 func (s *Server) RemoveLink(w http.ResponseWriter, r *http.Request) {
-	chatIDStr := r.Header.Get("Tg-Chat-Id")
+	chatIDStr := r.URL.Query().Get("Tg-Chat-Id")
 	chatID, err := strconv.ParseInt(chatIDStr, 10, 64)
+
 	if err != nil || chatID <= 0 {
 		http.Error(w, "Invalid chat ID", http.StatusBadRequest)
 		return
@@ -228,7 +246,6 @@ func (s *Server) RemoveLink(w http.ResponseWriter, r *http.Request) {
 	var request scrappertypes.RemoveLinkRequest
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 		http.Error(w, "Invalid request.", http.StatusBadRequest)
-
 		return
 	}
 
@@ -237,15 +254,12 @@ func (s *Server) RemoveLink(w http.ResponseWriter, r *http.Request) {
 	chat, exists := s.chats[chatID]
 	if !exists {
 		http.Error(w, "Chat not found.", http.StatusNotFound)
-
 		return
 	}
 
 	for i, link := range chat.Links {
 		if link.URL == request.Link {
 			chat.Links = append(chat.Links[:i], chat.Links[i+1:]...)
-			json.NewEncoder(w).Encode(link)
-
 			return
 		}
 	}
