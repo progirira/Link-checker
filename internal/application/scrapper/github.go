@@ -22,7 +22,12 @@ func CheckGitHubUpdates(repoName string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer response.Body.Close()
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+
+		}
+	}(response.Body)
 
 	if response.StatusCode != 200 {
 		fmt.Printf("GitHub API error: %s", response.Status)

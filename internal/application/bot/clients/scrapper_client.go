@@ -43,13 +43,12 @@ func (c *ScrapperClient) doWithChat(method string, id int64, debugMes string) er
 }
 
 func (c *ScrapperClient) GetLinks(chatID int64) (*scrappertypes.ListLinksResponse, error) {
-	u := fmt.Sprintf("/links")
+	u := "/links"
 
 	q := url.Values{}
 	q.Add("Tg-Chat-Id", fmt.Sprintf("%d", chatID))
 
 	responseBody, err := DoRequest(c.client, http.MethodGet, c.scheme, c.host, u, q, nil)
-
 	if err != nil {
 		return nil, err
 	}
@@ -58,6 +57,7 @@ func (c *ScrapperClient) GetLinks(chatID int64) (*scrappertypes.ListLinksRespons
 	if err := json.NewDecoder(responseBody).Decode(&listResp); err != nil {
 		return nil, err
 	}
+
 	return &listResp, nil
 }
 
@@ -83,6 +83,7 @@ func (c *ScrapperClient) doWithLink(method string, chatID int64, body []byte) (*
 	u := "/links"
 
 	q := url.Values{}
+
 	q.Add("Tg-Chat-Id", fmt.Sprintf("%d", chatID))
 	q.Add("Content-Type", "application/json")
 

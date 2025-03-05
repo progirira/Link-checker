@@ -9,7 +9,6 @@ import (
 	telegramtypes "go-progira/internal/domain/types/telegram_types"
 	"net/url"
 	"strings"
-	"time"
 )
 
 type StateChange func(id int, text string)
@@ -31,9 +30,9 @@ type Manager struct {
 	addRequests map[int]*scrappertypes.AddLinkRequest
 }
 
-func NewManager(tgClient clients.TelegramClient, scrapClient clients.ScrapperClient) *Manager {
+func NewManager(tgClient *clients.TelegramClient, scrapClient clients.ScrapperClient) *Manager {
 	return &Manager{
-		&tgClient,
+		tgClient,
 		&scrapClient,
 		make(map[int]state),
 		make(map[state]StateChange),
@@ -43,15 +42,17 @@ func NewManager(tgClient clients.TelegramClient, scrapClient clients.ScrapperCli
 
 func (m Manager) handleAwaitingStart(id int, text string) {
 	parts := strings.Fields(text)
+
 	switch parts[0] {
 	case "/start":
 		m.states[id] = stateStart
 
 		err := m.scrapClient.RegisterChat(int64(id))
-		fmt.Println("ID ", id)
+
 		if err != nil {
 			return
 		}
+
 		err = m.tgClient.SendMessage(id, botmessages.MsgHello)
 		if err != nil {
 			return
@@ -73,28 +74,39 @@ func isValidURL(str string) bool {
 
 func (m Manager) handleStart(id int, text string) {
 	parts := strings.Fields(text)
+
 	switch parts[0] {
 	case "/track":
 		if isValidURL(parts[1]) {
 			m.addRequests[id] = &scrappertypes.AddLinkRequest{Link: parts[1]}
-			m.tgClient.SendMessage(id, botmessages.MsgAddTags)
+
+			err := m.tgClient.SendMessage(id, botmessages.MsgAddTags)
+			if err != nil {
+				return
+			}
+
 			m.states[id] = stateAwaitingTagsForTrack
 		}
 	case "/untrack":
 		if isValidURL(parts[1]) {
 			delReq := scrappertypes.RemoveLinkRequest{Link: parts[1]}
+
 			_, err := m.scrapClient.RemoveLink(int64(id), delReq)
 			if err != nil {
 				return
 			}
 
-			m.tgClient.SendMessage(id, botmessages.MsgAddTags)
+			err = m.tgClient.SendMessage(id, botmessages.MsgAddTags)
+			if err != nil {
+				return
+			}
 		}
 	case "/list":
 		links, err := m.scrapClient.GetLinks(int64(id))
 		if err != nil {
 			return
 		}
+
 		if len(links.Links) == 0 {
 			err = m.tgClient.SendMessage(id, botmessages.MsgNoSavedPages)
 		} else {
@@ -113,16 +125,19 @@ func (m Manager) handleStart(id int, text string) {
 
 func (m Manager) sendLinks(id int, links []scrappertypes.LinkResponse) error {
 	var linksToSend strings.Builder
+
 	for _, linkResp := range links {
 		rec := fmt.Sprintf("%s Tags: %s Filters: %s", linkResp.URL,
 			linkResp.Tags, linkResp.Filters)
 		linksToSend.WriteString(rec)
 		linksToSend.WriteString("\n")
 	}
+
 	err := m.tgClient.SendMessage(id, linksToSend.String())
 	if err != nil {
 		return err
 	}
+
 	return nil
 }
 
@@ -140,16 +155,23 @@ func splitByWords(text string) []string {
 func (m Manager) handleAwaitingTagsForTrack(id int, text string) {
 	tags := splitByWords(text)
 	m.addRequests[id].Tags = tags
-	m.tgClient.SendMessage(id, botmessages.MsgAddFilters)
+
+	err := m.tgClient.SendMessage(id, botmessages.MsgAddFilters)
+	if err != nil {
+		return
+	}
+
 	m.states[id] = stateAwaitingFiltersForTrack
 }
 
 func (m Manager) handleAwaitingFiltersForTrack(id int, text string) {
 	filters := splitByWords(text)
 	m.addRequests[id].Filters = filters
-	m.tgClient.SendMessage(id, botmessages.MsgSaved)
 	m.states[id] = stateStart
 	_, err := m.scrapClient.AddLink(int64(id), *m.addRequests[id])
+
+	m.tgClient.SendMessage(id, botmessages.MsgSaved)
+
 	if err != nil {
 		return
 	}
@@ -172,6 +194,7 @@ func (m *Manager) getUserState(id int) state {
 
 func (m Manager) Start() {
 	m.buildHandlers()
+
 	var offset int
 
 	for {
@@ -193,7 +216,5 @@ func (m Manager) Start() {
 				offset = res.ID + 1
 			}
 		}
-
-		time.Sleep(100 * time.Microsecond)
 	}
 }

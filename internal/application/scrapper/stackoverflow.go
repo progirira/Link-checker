@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strings"
 )
 
 type questions struct {
@@ -19,11 +21,30 @@ func IsStackOverflowURL(url string) bool {
 	return len(url) >= 25 && url[:25] == "https://stackoverflow.com"
 }
 
-func CheckStackOverflowUpdates(url string) (string, error) {
-	response, err := http.Get(url)
+func GetStackOverflowUpdates(link string) (string, error) {
+	parts := strings.Split(link, "/")
+	linkID := parts[4]
+
+	u := url.URL{
+		Scheme: "https",
+		Host:   "api.stackexchange.com",
+		Path:   fmt.Sprintf("2.3/questions/%s/answers", linkID),
+	}
+	req, err := http.NewRequest(http.MethodGet, u.String(), http.NoBody)
+
+	q := req.URL.Query()
+	q.Add("order", "desc")
+	q.Add("sort", "activity")
+	q.Add("site", "stackoverflow")
+
+	req.URL.RawQuery = q.Encode()
+	client := &http.Client{}
+
+	response, err := client.Do(req)
 	if err != nil {
 		return "", err
 	}
+
 	defer response.Body.Close()
 
 	if response.StatusCode != 200 {
@@ -42,7 +63,7 @@ func CheckStackOverflowUpdates(url string) (string, error) {
 	}
 
 	if len(qs.Items) > 0 {
-		return fmt.Sprintf("%d", qs.Items[0].QuestionID), nil // Возвращаем ID самого нового вопроса
+		return fmt.Sprintf("%d", qs.Items[0].QuestionID), nil
 	}
 
 	return "", nil

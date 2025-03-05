@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"go-progira/internal/application/bot"
 	"go-progira/internal/application/bot/clients"
 	"go-progira/internal/application/bot/processing"
 	"log"
@@ -17,6 +18,7 @@ func loadEnv(filename string) error {
 	if err != nil {
 		return err
 	}
+
 	defer file.Close()
 
 	scanner := bufio.NewScanner(file)
@@ -46,14 +48,14 @@ func loadEnv(filename string) error {
 func getByKeyFromEnv(key string) (string, error) {
 	val, exists := os.LookupEnv(key)
 	if !exists {
-		log.Print(fmt.Sprintf("No %s in .env file found", key))
+		log.Printf("No %s in .env file found", key)
 		return val, ErrNoVal
 	}
+
 	return val, nil
 }
 
 func main() {
-
 	err := loadEnv(".env")
 	if err != nil {
 		log.Print("No .env file found")
@@ -77,6 +79,9 @@ func main() {
 	host = "localhost:8090"
 	scrapClient := clients.NewScrapperClient("http", host)
 
-	manager := processing.NewManager(tgClient, scrapClient)
+	server := bot.NewServer(&tgClient)
+	server.Start()
+
+	manager := processing.NewManager(&tgClient, scrapClient)
 	manager.Start()
 }

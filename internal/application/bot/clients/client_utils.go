@@ -2,7 +2,6 @@ package clients
 
 import (
 	"bytes"
-	"fmt"
 	"go-progira/lib/e"
 	"io"
 	"net/http"
@@ -17,7 +16,6 @@ func DoRequest(client http.Client, method, scheme, host, path string, query url.
 		Host:   host,
 		Path:   path,
 	}
-	fmt.Println(u)
 
 	req, err := http.NewRequest(method, u.String(), bytes.NewBuffer(body))
 	if err != nil {
@@ -30,12 +28,6 @@ func DoRequest(client http.Client, method, scheme, host, path string, query url.
 	if err != nil {
 		return nil, e.Wrap(errMsg, err)
 	}
-	//defer resp.Body.Close()
-
-	//respBody, err := resp.Body
-	//if err != nil {
-	//	return nil, err
-	//}
 
 	return resp.Body, nil
 }
