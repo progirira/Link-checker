@@ -79,7 +79,9 @@ func (s *Server) monitorLinks() {
 				s.updateLinkContent(chatID, link.URL, currentVersion)
 			case false:
 				if IsGitHubURL(link.URL) {
-					// currentVersion, _ = CheckGitHubUpdates(link.URL)
+					currentVersion, _ = CheckGitHubUpdates(link.URL)
+
+					s.updateLinkContent(chatID, link.URL, currentVersion)
 				}
 
 			default:
@@ -223,7 +225,13 @@ func (s *Server) AddLink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	content, err := GetStackOverflowUpdates(request.Link)
+	content := ""
+
+	if IsGitHubURL(request.Link) {
+		content, err = CheckGitHubUpdates(request.Link)
+	} else if IsStackOverflowURL(request.Link) {
+		content, err = GetStackOverflowUpdates(request.Link)
+	}
 
 	link := &scrappertypes.LinkResponse{
 		ID:          int64(len(s.chats[chatID].Links) + 1),
