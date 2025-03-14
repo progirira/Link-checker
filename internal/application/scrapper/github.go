@@ -3,7 +3,8 @@ package scrapper
 import (
 	"encoding/json"
 	"fmt"
-	"io"
+	"go-progira/lib/e"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -19,51 +20,76 @@ func IsGitHubURL(url string) bool {
 
 func (c Commits) getGeneralSha() string {
 	sumSha := strings.Builder{}
+
 	for _, commit := range c {
 		sumSha.WriteString(commit.Sha)
 	}
+
 	return sumSha.String()
 }
 
-func CheckGitHubUpdates(link string) (string, error) {
+func GetOwnerAndRepo(link string) (owner, repo string, err error) {
 	parts := strings.Split(link, "/")
-	owner := parts[3]
-	repo := parts[4]
+
+	if len(parts) < 5 {
+		if parts[3] != "" {
+			err = e.ErrNoRepoInPath
+		} else {
+			err = e.ErrNoOwnerAndRepoInPath
+		}
+
+		return "", "", err
+	}
+
+	owner = parts[3]
+	repo = parts[4]
+
+	return owner, repo, nil
+}
+
+func CheckGitHubUpdates(link string) (string, error) {
+	owner, repo, err := GetOwnerAndRepo(link)
+	if err != nil {
+		slog.Error(err.Error(),
+			slog.String("link", link),
+		)
+
+		return "", err
+	}
 
 	u := url.URL{
 		Scheme: "https",
 		Host:   "api.github.com",
 		Path:   fmt.Sprintf("repos/%s/%s/commits", owner, repo),
 	}
-	req, err := http.NewRequest(http.MethodGet, u.String(), http.NoBody)
 
-	client := &http.Client{}
+	req, errMakeReq := http.NewRequest(http.MethodGet, u.String(), http.NoBody)
+	if errMakeReq != nil {
+		slog.Error(
+			e.ErrMakeRequest.Error(),
+			slog.String("error", errMakeReq.Error()),
+			slog.String("function", "Github updates"),
+			slog.String("method", http.MethodGet),
+			slog.String("url", u.String()),
+		)
 
-	response, err := client.Do(req)
-	if err != nil {
-		return "", err
+		return "", e.ErrMakeRequest
 	}
 
-	defer func(Body io.ReadCloser) {
-		err := Body.Close()
-		if err != nil {
-
-		}
-	}(response.Body)
-
-	if response.StatusCode != 200 {
-		return "", fmt.Errorf("stack Overflow API error: %s", response.Status)
-	}
-
-	body, err := io.ReadAll(response.Body)
+	body, err := doRequest(req)
 	if err != nil {
 		return "", err
 	}
 
 	commits := Commits{}
 
-	if err := json.Unmarshal(body, &commits); err != nil {
-		return "", err
+	if errDecode := json.Unmarshal(body, &commits); errDecode != nil {
+		slog.Error(
+			e.ErrDecodeJSONBody.Error(),
+			slog.String("error", errDecode.Error()),
+		)
+
+		return "", e.ErrDecodeJSONBody
 	}
 
 	if len(commits) > 0 {

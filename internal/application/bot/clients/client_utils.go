@@ -4,29 +4,41 @@ import (
 	"bytes"
 	"go-progira/lib/e"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 )
 
 func DoRequest(client http.Client, method, scheme, host, path string, query url.Values, body []byte) (io.ReadCloser, error) {
-	const errMsg = "can't do request"
-
 	u := url.URL{
 		Scheme: scheme,
 		Host:   host,
 		Path:   path,
 	}
 
-	req, err := http.NewRequest(method, u.String(), bytes.NewBuffer(body))
-	if err != nil {
-		return nil, e.Wrap(errMsg, err)
+	req, errMakeReq := http.NewRequest(method, u.String(), bytes.NewBuffer(body))
+	if errMakeReq != nil {
+		slog.Error(
+			e.ErrMakeRequest.Error(),
+			slog.String("error", errMakeReq.Error()),
+			slog.String("method", method),
+			slog.String("url", u.String()),
+			slog.String("body", string(body)),
+		)
+
+		return nil, e.ErrMakeRequest
 	}
 
 	req.URL.RawQuery = query.Encode()
 
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, e.Wrap(errMsg, err)
+	resp, errDoReq := client.Do(req)
+	if errDoReq != nil {
+		slog.Error(
+			e.ErrDoRequest.Error(),
+			slog.String("error", errDoReq.Error()),
+		)
+
+		return nil, e.ErrDoRequest
 	}
 
 	return resp.Body, nil

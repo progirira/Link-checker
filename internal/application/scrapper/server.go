@@ -2,18 +2,19 @@ package scrapper
 
 import (
 	"encoding/json"
-	"fmt"
-	"github.com/go-co-op/gocron"
 	botmessages "go-progira/internal/domain/bot_messages"
 	bottypes "go-progira/internal/domain/types/bot_types"
 	scrappertypes "go-progira/internal/domain/types/scrapper_types"
+	"go-progira/lib/e"
+	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
-)
 
-const MaxInt32 = 2147483647
+	"github.com/go-co-op/gocron"
+)
 
 type Server struct {
 	chats     map[int64]*scrappertypes.Chat
@@ -34,10 +35,21 @@ func (s *Server) Start() {
 	http.HandleFunc("/links", s.LinksHandler)
 	s.startScheduler()
 
-	fmt.Println("Starting server on :8090...")
+	slog.Debug("Starting server on :8090...")
 
-	if err := http.ListenAndServe(":8090", nil); err != nil {
-		fmt.Println("Server failed:", err)
+	srv := &http.Server{
+		Addr:         ":8090",
+		Handler:      nil,
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 10 * time.Second,
+		IdleTimeout:  120 * time.Second,
+	}
+
+	if err := srv.ListenAndServe(); err != nil {
+		slog.Error(
+			e.ErrServerFailed.Error(),
+			slog.String("error", err.Error()),
+		)
 	}
 }
 
@@ -70,22 +82,34 @@ func (s *Server) monitorLinks() {
 
 	for chatID, chat := range s.chats {
 		for _, link := range chat.Links {
-			var currentVersion string
-
 			switch IsStackOverflowURL(link.URL) {
 			case true:
-				currentVersion, _ = GetStackOverflowUpdates(link.URL)
+				currentVersion, err := GetStackOverflowUpdates(link.URL)
+				if err != nil {
+					return
+				}
 
-				s.updateLinkContent(chatID, link.URL, currentVersion)
+				if currentVersion != "" {
+					s.updateLinkContent(chatID, link.URL, currentVersion)
+				}
 			case false:
 				if IsGitHubURL(link.URL) {
-					currentVersion, _ = CheckGitHubUpdates(link.URL)
+					currentVersion, err := CheckGitHubUpdates(link.URL)
+					if err != nil {
+						return
+					}
 
-					s.updateLinkContent(chatID, link.URL, currentVersion)
+					if currentVersion != "" {
+						s.updateLinkContent(chatID, link.URL, currentVersion)
+					}
 				}
 
 			default:
-				fmt.Println("не github и не stackoverflow")
+				slog.Error(
+					e.ErrWrongURLFormat.Error(),
+					slog.String("function", "monitorLinks"),
+					slog.String("url", link.URL),
+				)
 			}
 		}
 	}
@@ -97,7 +121,10 @@ func (s *Server) startScheduler() {
 
 	_, err := sc.Every(6).Seconds().Do(task)
 	if err != nil {
-		return
+		slog.Error(
+			e.ErrScheduler.Error(),
+			slog.String("error", err.Error()),
+		)
 	}
 
 	sc.StartAsync()
@@ -112,6 +139,12 @@ func (s *Server) LinksHandler(w http.ResponseWriter, r *http.Request) {
 	case http.MethodDelete:
 		s.RemoveLink(w, r)
 	default:
+		slog.Error(
+			e.ErrMethodNotAllowed.Error(),
+			slog.String("method", r.Method),
+			slog.String("allowed methods", strings.Join([]string{http.MethodGet, http.MethodPost, http.MethodDelete}, " ")),
+		)
+
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
 }
@@ -148,6 +181,7 @@ func (s *Server) RegisterChat(w http.ResponseWriter, r *http.Request) {
 	response := map[string]interface{}{"message": "Chat registered successfully", "id": id}
 
 	w.WriteHeader(http.StatusOK)
+
 	errEncoding := json.NewEncoder(w).Encode(response)
 	if errEncoding != nil {
 		return
@@ -194,13 +228,7 @@ func (s *Server) GetLinks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	size := len(chat.Links)
-	if size > MaxInt32 {
-		http.Error(w, "Too many links", http.StatusInternalServerError)
-		return
-	}
-
-	response1 := scrappertypes.ListLinksResponse{Links: chat.Links, Size: int32(len(chat.Links))}
+	response1 := scrappertypes.ListLinksResponse{Links: chat.Links, Size: len(chat.Links)}
 
 	w.Header().Set("Content-Type", "application/json")
 
@@ -229,8 +257,14 @@ func (s *Server) AddLink(w http.ResponseWriter, r *http.Request) {
 
 	if IsGitHubURL(request.Link) {
 		content, err = CheckGitHubUpdates(request.Link)
+		if err != nil {
+			return
+		}
 	} else if IsStackOverflowURL(request.Link) {
 		content, err = GetStackOverflowUpdates(request.Link)
+		if err != nil {
+			return
+		}
 	}
 
 	link := &scrappertypes.LinkResponse{

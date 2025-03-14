@@ -3,9 +3,10 @@ package scrapper
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	bottypes "go-progira/internal/domain/types/bot_types"
+	"go-progira/lib/e"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 )
@@ -24,7 +25,7 @@ func NewBotClient(scheme, host, basePath string) *BotClient {
 	}
 }
 
-func (c *BotClient) sendUpdate(update bottypes.LinkUpdate) error {
+func (c *BotClient) sendUpdate(update bottypes.LinkUpdate) (err error) {
 	u := url.URL{
 		Scheme: c.scheme,
 		Host:   c.host,
@@ -33,19 +34,33 @@ func (c *BotClient) sendUpdate(update bottypes.LinkUpdate) error {
 
 	jsonData, err := json.Marshal(update)
 	if err != nil {
-		return fmt.Errorf("failed to marshal JSON: %s", err)
+		slog.Error(
+			e.ErrMarshalJSON.Error(),
+			slog.String("error", err.Error()),
+		)
+
+		return e.ErrMarshalJSON
 	}
 
-	resp, err := http.Post(u.String(), "application/json", bytes.NewBuffer(jsonData))
-	defer func(Body io.ReadCloser) {
-		err := Body.Close()
-		if err != nil {
-			return
-		}
-	}(resp.Body)
+	resp, errDoReq := http.Post(u.String(), "application/json", bytes.NewBuffer(jsonData))
 
-	if err != nil {
-		return fmt.Errorf("failed to send request: %s", err)
+	errClose := resp.Body.Close()
+	if errClose != nil {
+		slog.Error(
+			e.ErrCloseBody.Error(),
+			slog.String("error", errClose.Error()),
+		)
+
+		return e.ErrCloseBody
+	}
+
+	if errDoReq != nil {
+		slog.Error(
+			e.ErrDoRequest.Error(),
+			slog.String("error", errDoReq.Error()),
+		)
+
+		return e.ErrDoRequest
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -53,11 +68,20 @@ func (c *BotClient) sendUpdate(update bottypes.LinkUpdate) error {
 
 		var apiError bottypes.APIErrorResponse
 
-		if err := json.Unmarshal(body, &apiError); err != nil {
-			return fmt.Errorf("non-200 status code: %s, response: %s", resp.Status, string(body))
+		if errDecode := json.Unmarshal(body, &apiError); errDecode != nil {
+			slog.Error(
+				e.ErrDecodeJSONBody.Error(),
+				slog.String("error", errDecode.Error()),
+				slog.String("response", string(body)),
+			)
 		}
 
-		return fmt.Errorf("API returned error: %s", apiError.Description)
+		slog.Error(
+			e.ErrAPI.Error(),
+			slog.String("error", apiError.Description),
+		)
+
+		return e.ErrAPI
 	}
 
 	return nil

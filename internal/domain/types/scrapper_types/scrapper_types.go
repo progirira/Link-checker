@@ -27,7 +27,7 @@ type AddLinkRequest struct {
 
 type ListLinksResponse struct {
 	Links []LinkResponse `json:"links"`
-	Size  int32          `json:"size"`
+	Size  int            `json:"size"`
 }
 
 type RemoveLinkRequest struct {

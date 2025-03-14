@@ -3,7 +3,8 @@ package scrapper
 import (
 	"encoding/json"
 	"fmt"
-	"io"
+	"go-progira/lib/e"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -21,7 +22,7 @@ func IsStackOverflowURL(url string) bool {
 	return len(url) >= 25 && url[:25] == "https://stackoverflow.com"
 }
 
-func GetStackOverflowUpdates(link string) (string, error) {
+func GetStackOverflowUpdates(link string) (str string, err error) {
 	parts := strings.Split(link, "/")
 	linkID := parts[4]
 
@@ -30,7 +31,16 @@ func GetStackOverflowUpdates(link string) (string, error) {
 		Host:   "api.stackexchange.com",
 		Path:   fmt.Sprintf("2.3/questions/%s/answers", linkID),
 	}
-	req, err := http.NewRequest(http.MethodGet, u.String(), http.NoBody)
+
+	req, errReq := http.NewRequest(http.MethodGet, u.String(), http.NoBody)
+	if errReq != nil {
+		slog.Error(
+			e.ErrMakeRequest.Error(),
+			slog.String("error", errReq.Error()),
+		)
+
+		return "", errReq
+	}
 
 	q := req.URL.Query()
 	q.Add("order", "desc")
@@ -38,27 +48,19 @@ func GetStackOverflowUpdates(link string) (string, error) {
 	q.Add("site", "stackoverflow")
 
 	req.URL.RawQuery = q.Encode()
-	client := &http.Client{}
 
-	response, err := client.Do(req)
-	if err != nil {
-		return "", err
-	}
-
-	defer response.Body.Close()
-
-	if response.StatusCode != 200 {
-		return "", fmt.Errorf("stack Overflow API error: %s", response.Status)
-	}
-
-	body, err := io.ReadAll(response.Body)
-	if err != nil {
-		return "", err
+	body, errDoReq := doRequest(req)
+	if errDoReq != nil {
+		return "", e.ErrDoRequest
 	}
 
 	qs := questions{}
 
-	if err := json.Unmarshal(body, &qs); err != nil {
+	if errDecode := json.Unmarshal(body, &qs); errDecode != nil {
+		slog.Error(
+			e.ErrDecodeJSONBody.Error(),
+			slog.String("error", errDecode.Error()))
+
 		return "", err
 	}
 

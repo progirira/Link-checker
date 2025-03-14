@@ -4,22 +4,40 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
-	"go-progira/internal/application/bot"
 	"go-progira/internal/application/bot/clients"
 	"go-progira/internal/application/bot/processing"
-	"log"
+	"go-progira/internal/domain"
+	"go-progira/lib/e"
+	"log/slog"
 	"os"
 	"strings"
 )
 
-func loadEnv(filename string) error {
-	file, err := os.Open(filename)
+func loadEnv(filename string) (err error) {
+	file, openErr := os.Open(filename)
+	if openErr != nil {
+		slog.Error(
+			e.ErrOpenFile.Error(),
+			slog.String("error", openErr.Error()),
+			slog.String("filename", filename),
+		)
 
-	if err != nil {
-		return err
+		return e.ErrOpenFile
 	}
 
-	defer file.Close()
+	defer func(file *os.File) {
+		if closeErr := file.Close(); closeErr != nil {
+			if err == nil { // если других ошибок не было
+				slog.Error(
+					e.ErrCloseFile.Error(),
+					slog.String("error", closeErr.Error()),
+					slog.String("filename", filename),
+				)
+
+				err = e.ErrCloseFile
+			}
+		}
+	}(file)
 
 	scanner := bufio.NewScanner(file)
 
@@ -39,38 +57,73 @@ func loadEnv(filename string) error {
 		key := strings.TrimSpace(parts[0])
 		value := strings.TrimSpace(parts[1])
 
-		os.Setenv(key, value)
+		errSetEnv := os.Setenv(key, value)
+		if errSetEnv != nil {
+			slog.Error(
+				e.ErrOsSetEnv.Error(),
+				slog.String("error", errSetEnv.Error()),
+				slog.String("filename", filename),
+				slog.String("key", key),
+				slog.String("value", value),
+			)
+
+			return e.ErrOsSetEnv
+		}
 	}
 
-	return scanner.Err()
+	if scanner.Err() != nil {
+		slog.Error(
+			e.ErrScanFile.Error(),
+			slog.String("error", scanner.Err().Error()),
+			slog.String("filename", filename),
+		)
+
+		return e.ErrScanFile
+	}
+
+	return err
 }
 
 func getByKeyFromEnv(key string) (string, error) {
 	val, exists := os.LookupEnv(key)
 	if !exists {
-		log.Printf("No %s in .env file found", key)
-		return val, ErrNoVal
+		slog.Error(
+			e.ErrNoValInEnv.Error(),
+			slog.String("key", key),
+		)
+
+		return "", e.ErrNoValInEnv
 	}
 
 	return val, nil
 }
 
 func main() {
-	err := loadEnv(".env")
-	if err != nil {
-		log.Print("No .env file found")
+	fileForLogs := "logs.txt"
+
+	loggerErr := domain.SetNewLogger(fileForLogs)
+	if errors.Is(loggerErr, e.ErrOpenFile) {
+		fmt.Println(loggerErr.Error())
+
+		return
+	}
+
+	errLoadEnv := loadEnv(".env")
+	if errLoadEnv != nil {
 		return
 	}
 
 	token, err := getByKeyFromEnv("TELEGRAM_BOT_API_TOKEN")
-	if errors.Is(err, ErrNoVal) {
+	if errors.Is(err, e.ErrNoValInEnv) {
 		fmt.Println(err.Error())
+
 		return
 	}
 
 	host, err := getByKeyFromEnv("BOT_HOST")
-	if errors.Is(err, ErrNoVal) {
+	if errors.Is(err, e.ErrNoValInEnv) {
 		fmt.Println(err.Error())
+
 		return
 	}
 
@@ -79,9 +132,9 @@ func main() {
 	host = "localhost:8090"
 	scrapClient := clients.NewScrapperClient("http", host)
 
-	server := bot.NewServer(&tgClient)
+	server := processing.NewServer(&tgClient)
 	server.Start()
 
-	manager := processing.NewManager(&tgClient, scrapClient)
+	manager := processing.NewManager(&tgClient, &scrapClient)
 	manager.Start()
 }

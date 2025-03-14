@@ -30,10 +30,10 @@ type Manager struct {
 	addRequests map[int]*scrappertypes.AddLinkRequest
 }
 
-func NewManager(tgClient *clients.TelegramClient, scrapClient clients.ScrapperClient) *Manager {
+func NewManager(tgClient *clients.TelegramClient, scrapClient *clients.ScrapperClient) *Manager {
 	return &Manager{
 		tgClient,
-		&scrapClient,
+		scrapClient,
 		make(map[int]state),
 		make(map[state]StateChange),
 		make(map[int]*scrappertypes.AddLinkRequest),
@@ -47,13 +47,9 @@ func (m Manager) handleAwaitingStart(id int, text string) {
 	case "/start":
 		m.states[id] = stateStart
 
-		err := m.scrapClient.RegisterChat(int64(id))
+		m.scrapClient.RegisterChat(int64(id))
 
-		if err != nil {
-			return
-		}
-
-		err = m.tgClient.SendMessage(id, botmessages.MsgHello)
+		err := m.tgClient.SendMessage(id, botmessages.MsgHello)
 		if err != nil {
 			return
 		}
@@ -108,9 +104,14 @@ func (m Manager) handleStart(id int, text string) {
 		}
 
 		if len(links.Links) == 0 {
-			err = m.tgClient.SendMessage(id, botmessages.MsgNoSavedPages)
+			_ = m.tgClient.SendMessage(id, botmessages.MsgNoSavedPages)
 		} else {
-			err = m.sendLinks(id, links.Links)
+			linkList := makeLinkList(links.Links)
+
+			err := m.tgClient.SendMessage(id, linkList)
+			if err != nil {
+				return
+			}
 		}
 	case "/help":
 		m.sendHelp(id)
@@ -123,22 +124,17 @@ func (m Manager) handleStart(id int, text string) {
 	}
 }
 
-func (m Manager) sendLinks(id int, links []scrappertypes.LinkResponse) error {
+func makeLinkList(links []scrappertypes.LinkResponse) string {
 	var linksToSend strings.Builder
 
 	for _, linkResp := range links {
 		rec := fmt.Sprintf("%s Tags: %s Filters: %s", linkResp.URL,
-			linkResp.Tags, linkResp.Filters)
+			strings.Join(linkResp.Tags, ""), strings.Join(linkResp.Filters, ""))
 		linksToSend.WriteString(rec)
 		linksToSend.WriteString("\n")
 	}
 
-	err := m.tgClient.SendMessage(id, linksToSend.String())
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return linksToSend.String()
 }
 
 func (m Manager) sendHelp(id int) {
@@ -170,7 +166,10 @@ func (m Manager) handleAwaitingFiltersForTrack(id int, text string) {
 	m.states[id] = stateStart
 	_, err := m.scrapClient.AddLink(int64(id), *m.addRequests[id])
 
-	m.tgClient.SendMessage(id, botmessages.MsgSaved)
+	errSendMes := m.tgClient.SendMessage(id, botmessages.MsgSaved)
+	if errSendMes != nil {
+		return
+	}
 
 	if err != nil {
 		return

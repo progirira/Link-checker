@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	scrappertypes "go-progira/internal/domain/types/scrapper_types"
+	"go-progira/lib/e"
+	"log/slog"
 	"net/http"
 	"net/url"
 )
@@ -22,24 +24,24 @@ func NewScrapperClient(scheme, host string) ScrapperClient {
 	}
 }
 
-func (c *ScrapperClient) RegisterChat(id int64) error {
-	return c.doWithChat(http.MethodPost, id, "error registering chat: %s")
+func (c *ScrapperClient) RegisterChat(id int64) {
+	c.doWithChat(http.MethodPost, id, "error registering chat: %s")
 }
 
-func (c *ScrapperClient) DeleteChat(id int64) error {
-	return c.doWithChat(http.MethodDelete, id, "error deleting chat: %s")
+func (c *ScrapperClient) DeleteChat(id int64) {
+	c.doWithChat(http.MethodDelete, id, "error deleting chat: %s")
 }
 
-func (c *ScrapperClient) doWithChat(method string, id int64, debugMes string) error {
+func (c *ScrapperClient) doWithChat(method string, id int64, debugMes string) {
 	u := fmt.Sprintf("/tg-chat/%d", id)
 
 	_, err := DoRequest(c.client, method, "http", c.host, u, url.Values{}, nil)
 	if err != nil {
-		fmt.Println(debugMes)
-		return err
+		slog.Debug(
+			e.ErrDoRequest.Error(),
+			slog.String("message", debugMes),
+		)
 	}
-
-	return nil
 }
 
 func (c *ScrapperClient) GetLinks(chatID int64) (*scrappertypes.ListLinksResponse, error) {
@@ -48,14 +50,24 @@ func (c *ScrapperClient) GetLinks(chatID int64) (*scrappertypes.ListLinksRespons
 	q := url.Values{}
 	q.Add("Tg-Chat-Id", fmt.Sprintf("%d", chatID))
 
-	responseBody, err := DoRequest(c.client, http.MethodGet, c.scheme, c.host, u, q, nil)
-	if err != nil {
-		return nil, err
+	responseBody, errDoReq := DoRequest(c.client, http.MethodGet, c.scheme, c.host, u, q, nil)
+	if errDoReq != nil {
+		slog.Error(
+			e.ErrDoRequest.Error(),
+			slog.String("error", errDoReq.Error()),
+		)
+
+		return nil, e.ErrDoRequest
 	}
 
 	var listResp scrappertypes.ListLinksResponse
-	if err := json.NewDecoder(responseBody).Decode(&listResp); err != nil {
-		return nil, err
+	if errDecode := json.NewDecoder(responseBody).Decode(&listResp); errDecode != nil {
+		slog.Error(
+			e.ErrDecodeJSONBody.Error(),
+			slog.String("error", errDecode.Error()),
+		)
+
+		return nil, e.ErrDecodeJSONBody
 	}
 
 	return &listResp, nil
@@ -64,7 +76,11 @@ func (c *ScrapperClient) GetLinks(chatID int64) (*scrappertypes.ListLinksRespons
 func (c *ScrapperClient) AddLink(chatID int64, request scrappertypes.AddLinkRequest) (*scrappertypes.LinkResponse, error) {
 	body, err := json.Marshal(request)
 	if err != nil {
-		return nil, err
+		slog.Error(
+			e.ErrMarshalJSON.Error(),
+			slog.String("error", err.Error()))
+
+		return nil, e.ErrMarshalJSON
 	}
 
 	return c.doWithLink(http.MethodPost, chatID, body)
@@ -73,7 +89,11 @@ func (c *ScrapperClient) AddLink(chatID int64, request scrappertypes.AddLinkRequ
 func (c *ScrapperClient) RemoveLink(chatID int64, request scrappertypes.RemoveLinkRequest) (*scrappertypes.LinkResponse, error) {
 	body, err := json.Marshal(request)
 	if err != nil {
-		return nil, err
+		slog.Error(
+			e.ErrMarshalJSON.Error(),
+			slog.String("error", err.Error()))
+
+		return nil, e.ErrMarshalJSON
 	}
 
 	return c.doWithLink(http.MethodDelete, chatID, body)
@@ -87,16 +107,25 @@ func (c *ScrapperClient) doWithLink(method string, chatID int64, body []byte) (*
 	q.Add("Tg-Chat-Id", fmt.Sprintf("%d", chatID))
 	q.Add("Content-Type", "application/json")
 
-	responseBody, err := DoRequest(c.client, method, c.scheme, c.host, u, q, body)
+	responseBody, errDoReq := DoRequest(c.client, method, c.scheme, c.host, u, q, body)
+	if errDoReq != nil {
+		slog.Error(
+			e.ErrDoRequest.Error(),
+			slog.String("error", errDoReq.Error()),
+		)
 
-	if err != nil {
-		return nil, err
+		return nil, e.ErrDoRequest
 	}
 
 	var linkResponse scrappertypes.LinkResponse
-	if err := json.NewDecoder(responseBody).Decode(&linkResponse); err != nil {
-		fmt.Println("error unmarshalling response")
-		return nil, err
+
+	if ErrDecode := json.NewDecoder(responseBody).Decode(&linkResponse); ErrDecode != nil {
+		slog.Error(
+			e.ErrDecodeJSONBody.Error(),
+			slog.String("error", ErrDecode.Error()),
+		)
+
+		return nil, e.ErrDecodeJSONBody
 	}
 
 	return &linkResponse, nil

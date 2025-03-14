@@ -1,11 +1,11 @@
-package bot
+package processing
 
 import (
 	"encoding/json"
-	"fmt"
 	"go-progira/internal/application/bot/clients"
 	bottypes "go-progira/internal/domain/types/bot_types"
-	"log"
+	"go-progira/lib/e"
+	"log/slog"
 	"net/http"
 	"time"
 )
@@ -22,14 +22,24 @@ func NewServer(tgClient *clients.TelegramClient) *Server {
 
 func (s *Server) handleUpdates(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
+		slog.Error(
+			e.ErrMethodNotAllowed.Error(),
+			slog.String("method", r.Method),
+			slog.String("allowed method", http.MethodPost),
+		)
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+
 		return
 	}
 
 	var linkUpdate bottypes.LinkUpdate
 
 	if err := json.NewDecoder(r.Body).Decode(&linkUpdate); err != nil {
-		log.Println("Error decoding JSON:", err)
+		slog.Error(
+			e.ErrDecodeJSONBody.Error(),
+			slog.String("error", err.Error()),
+		)
+
 		sendErrorResponse(w, "Invalid JSON", "400", "LinkUpdate", "Failed to decode JSON", nil)
 
 		return
@@ -40,13 +50,15 @@ func (s *Server) handleUpdates(w http.ResponseWriter, r *http.Request) {
 
 	response := map[string]string{"status": "Update received"}
 	if err := json.NewEncoder(w).Encode(response); err != nil {
-		log.Println("Error encoding response:", err)
-	}
+		slog.Error(
+			e.ErrEncodeToJSON.Error(),
+			slog.String("error", err.Error()),
+		)
 
-	err := s.tgClient.SendMessage(int(linkUpdate.TgChatIDs[0]), linkUpdate.Description+linkUpdate.URL)
-	if err != nil {
 		return
 	}
+
+	_ = s.tgClient.SendMessage(int(linkUpdate.TgChatIDs[0]), linkUpdate.Description+linkUpdate.URL)
 }
 
 func sendErrorResponse(w http.ResponseWriter, desc, code, exceptionName, exceptionMsg string, stacktrace []string) {
@@ -62,7 +74,12 @@ func sendErrorResponse(w http.ResponseWriter, desc, code, exceptionName, excepti
 	w.Header().Set("Content-Type", "application/json")
 
 	if err := json.NewEncoder(w).Encode(apiError); err != nil {
-		log.Println("Error encoding error response:", err)
+		slog.Error(
+			e.ErrEncodeToJSON.Error(),
+			slog.String("error", err.Error()),
+		)
+
+		return
 	}
 }
 
@@ -79,11 +96,14 @@ func (s *Server) Start() {
 		IdleTimeout:  60 * time.Second,
 	}
 
-	fmt.Println("Starting server on :8080...")
+	slog.Debug("Starting server on :8080...")
 
 	go func() {
 		if err := srv.ListenAndServe(); err != nil {
-			fmt.Println("Server failed:", err)
+			slog.Error(
+				e.ErrServerFailed.Error(),
+				slog.String("error", err.Error()),
+			)
 		}
 	}()
 }

@@ -3,6 +3,7 @@ package clients
 import (
 	"go-progira/lib/e"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"path"
@@ -44,11 +45,24 @@ func (c *TelegramClient) Updates(offset, limit int) ([]byte, error) {
 	q.Add("offset", strconv.Itoa(offset))
 	q.Add("limit", strconv.Itoa(limit))
 
-	body, err := DoRequest(c.client, http.MethodGet, c.scheme, c.host, path.Join(c.basePath, getUpdatesMethod), q, nil)
-	data, _ := io.ReadAll(body)
+	body, errDoReq := DoRequest(c.client, http.MethodGet, c.scheme, c.host, path.Join(c.basePath, getUpdatesMethod), q, nil)
+	if errDoReq != nil {
+		slog.Error(
+			e.ErrDoRequest.Error(),
+			slog.String("method", getUpdatesMethod),
+			slog.String("error", errDoReq.Error()),
+		)
 
-	if err != nil {
-		return nil, err
+		return nil, errDoReq
+	}
+
+	data, errRead := io.ReadAll(body)
+	if errRead != nil {
+		slog.Error(
+			e.ErrReadBody.Error(),
+			slog.String("error", errRead.Error()))
+
+		return nil, errRead
 	}
 
 	return data, nil
@@ -59,14 +73,16 @@ func (c *TelegramClient) SendMessage(chatID int, text string) error {
 	q.Add("chat_id", strconv.Itoa(chatID))
 	q.Add("text", text)
 
-	_, err := DoRequest(c.client, http.MethodGet, c.scheme, c.host, path.Join(c.basePath, sendMessageMethod), q, nil)
-	if err != nil {
-		return e.Wrap("can't send message", err)
-	}
+	_, errDoReq := DoRequest(c.client, http.MethodGet, c.scheme, c.host, path.Join(c.basePath, sendMessageMethod), q, nil)
+	if errDoReq != nil {
+		slog.Error(
+			e.ErrDoRequest.Error(),
+			slog.String("method", getUpdatesMethod),
+			slog.String("error", errDoReq.Error()),
+		)
 
-	//if body != nil {
-	//	fmt.Printf("Response: %s\n", string(body))
-	//}
+		return errDoReq
+	}
 
 	return nil
 }
