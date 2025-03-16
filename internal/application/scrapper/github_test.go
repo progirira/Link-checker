@@ -40,8 +40,6 @@ func TestIsGithubURL(t *testing.T) {
 	}
 
 	for _, testCase := range testCases {
-		testCase := testCase
-
 		t.Run(testCase.name, func(tt *testing.T) {
 			tt.Parallel()
 
@@ -87,8 +85,6 @@ func TestGetOwnerAndRepo(t *testing.T) {
 	}
 
 	for _, testCase := range testCases {
-		testCase := testCase
-
 		t.Run(testCase.name, func(tt *testing.T) {
 			tt.Parallel()
 
