@@ -173,6 +173,7 @@ func (s *Server) RegisterChat(w http.ResponseWriter, r *http.Request) {
 	defer s.ChatMutex.Unlock()
 
 	if _, exists := s.Chats[id]; exists {
+		slog.Error(e.ErrChatAlreadyExists.Error())
 		http.Error(w, "Chat already exists.", http.StatusBadRequest)
 		return
 	}

@@ -8,6 +8,8 @@ import (
 	"go-progira/internal/application/scrapper"
 	scrappertypes "go-progira/internal/domain/types/scrapper_types"
 	"go-progira/lib/e"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -32,7 +34,15 @@ func TestRegisterChat(t *testing.T) {
 	s.RegisterChat(w, req)
 
 	resp := w.Result()
-	defer resp.Body.Close()
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			slog.Error(
+				e.ErrCloseBody.Error(),
+				slog.String("error", err.Error()),
+			)
+		}
+	}(resp.Body)
 
 	expectedCode := http.StatusOK
 	if resp.StatusCode != expectedCode {
@@ -40,7 +50,13 @@ func TestRegisterChat(t *testing.T) {
 	}
 
 	var response map[string]interface{}
-	_ = json.NewDecoder(resp.Body).Decode(&response)
+	errDecode := json.NewDecoder(resp.Body).Decode(&response)
+	if errDecode != nil {
+		slog.Error(
+			e.ErrDecodeJSONBody.Error(),
+			slog.String("error", errDecode.Error()),
+		)
+	}
 
 	expectedAnswer := "Chat registered successfully"
 	if response["message"] != expectedAnswer {
@@ -56,7 +72,15 @@ func TestRegisterChat(t *testing.T) {
 	s.RegisterChat(w, req) // пробуем повторно зарегистрировать чат
 
 	resp = w.Result()
-	defer resp.Body.Close()
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			slog.Error(
+				e.ErrCloseBody.Error(),
+				slog.String("error", err.Error()),
+			)
+		}
+	}(resp.Body)
 
 	expectedCode = http.StatusBadRequest
 	if resp.StatusCode != expectedCode {
@@ -71,23 +95,23 @@ func TestIsURLInAdded(t *testing.T) {
 	}
 
 	chatID := int64(12345)
-	url := "url"
+	u := "url"
 	req := httptest.NewRequest(http.MethodPost, "/tg-chat/"+strconv.FormatInt(chatID, 10), http.NoBody)
 	w := httptest.NewRecorder()
 
 	s.RegisterChat(w, req)
 
-	if s.IsURLInAdded(chatID, url) != false {
-		t.Errorf("Incorrect value, got: %v; expected %v", s.IsURLInAdded(chatID, url), false)
+	if s.IsURLInAdded(chatID, u) != false {
+		t.Errorf("Incorrect value, got: %v; expected %v", s.IsURLInAdded(chatID, u), false)
 	}
 
 	chat := s.Chats[chatID]
-	link := scrappertypes.LinkResponse{URL: url}
+	link := scrappertypes.LinkResponse{URL: u}
 
 	chat.Links = append(chat.Links, link)
 
-	if s.IsURLInAdded(chatID, url) != true {
-		t.Errorf("Incorrect value, got: %v; expected %v", s.IsURLInAdded(chatID, url), true)
+	if s.IsURLInAdded(chatID, u) != true {
+		t.Errorf("Incorrect value, got: %v; expected %v", s.IsURLInAdded(chatID, u), true)
 	}
 }
 

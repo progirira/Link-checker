@@ -33,5 +33,4 @@ var (
 	ErrChatNotFound      = errors.New("chat not found")
 	ErrLinkAlreadyExists = errors.New("link already exists")
 	ErrChatAlreadyExists = errors.New("link already exists")
-	ErrInvalidChatID     = errors.New("invalid chat id")
 )
