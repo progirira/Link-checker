@@ -50,6 +50,7 @@ func TestRegisterChat(t *testing.T) {
 	}
 
 	var response map[string]interface{}
+
 	errDecode := json.NewDecoder(resp.Body).Decode(&response)
 	if errDecode != nil {
 		slog.Error(
