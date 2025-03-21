@@ -12,16 +12,6 @@ func doRequest(request *http.Request) (body []byte, err error) {
 
 	response, errDoReq := client.Do(request)
 
-	closeErr := response.Body.Close()
-	if closeErr != nil {
-		slog.Error(
-			e.ErrCloseBody.Error(),
-			slog.String("error", closeErr.Error()),
-		)
-
-		return nil, e.ErrCloseBody
-	}
-
 	if errDoReq != nil {
 		slog.Error(
 			e.ErrDoRequest.Error(),
@@ -33,12 +23,12 @@ func doRequest(request *http.Request) (body []byte, err error) {
 
 	if response.StatusCode != 200 {
 		slog.Error(
-			e.ErrStackoverflowAPI.Error(),
+			e.ErrAPI.Error(),
 			slog.String("function", "Github updates"),
 			slog.Int("status code", response.StatusCode),
 		)
 
-		return nil, e.ErrStackoverflowAPI
+		return nil, e.ErrAPI
 	}
 
 	body, errRead := io.ReadAll(response.Body)
@@ -49,6 +39,16 @@ func doRequest(request *http.Request) (body []byte, err error) {
 		)
 
 		return nil, e.ErrReadBody
+	}
+
+	closeErr := response.Body.Close()
+	if closeErr != nil {
+		slog.Error(
+			e.ErrCloseBody.Error(),
+			slog.String("error", closeErr.Error()),
+		)
+
+		return nil, e.ErrCloseBody
 	}
 
 	return body, nil

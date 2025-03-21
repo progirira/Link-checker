@@ -15,8 +15,8 @@ const (
 	sendMessageMethod = "sendMessage"
 )
 
-type MyClient interface {
-	DoRequest(method string, query url.Values) ([]byte, error)
+type HTTPTelegramClient interface {
+	Updates(offset, limit int) ([]byte, error)
 	SendMessage(chatID int, text string) error
 }
 

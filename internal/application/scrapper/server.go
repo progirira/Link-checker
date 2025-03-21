@@ -17,16 +17,16 @@ import (
 )
 
 type Server struct {
-	chats     map[int64]*scrappertypes.Chat
-	chatMutex sync.Mutex
-	botClient BotClient
+	Chats     map[int64]*scrappertypes.Chat
+	ChatMutex sync.Mutex
+	BotClient HTTPBotClient
 }
 
-func NewServer(client BotClient) *Server {
+func NewServer(client HTTPBotClient) *Server {
 	return &Server{
-		chats:     make(map[int64]*scrappertypes.Chat),
-		chatMutex: sync.Mutex{},
-		botClient: client,
+		Chats:     make(map[int64]*scrappertypes.Chat),
+		ChatMutex: sync.Mutex{},
+		BotClient: client,
 	}
 }
 
@@ -54,11 +54,11 @@ func (s *Server) Start() {
 }
 
 func (s *Server) updateLinkContent(chatID int64, url, lastContent string) {
-	for i, l := range s.chats[chatID].Links {
+	for i, l := range s.Chats[chatID].Links {
 		if url == l.URL {
 			if lastContent != "" && lastContent != l.LastVersion {
-				s.chats[chatID].Links[i].LastVersion = lastContent
-				s.chats[chatID].Links[i].LastChecked = time.Now()
+				s.Chats[chatID].Links[i].LastVersion = lastContent
+				s.Chats[chatID].Links[i].LastChecked = time.Now()
 
 				update := bottypes.LinkUpdate{
 					ID:          l.ID,
@@ -67,7 +67,7 @@ func (s *Server) updateLinkContent(chatID int64, url, lastContent string) {
 					TgChatIDs:   []int64{chatID},
 				}
 
-				err := s.botClient.sendUpdate(update)
+				err := s.BotClient.SendUpdate(update)
 				if err != nil {
 					return
 				}
@@ -77,10 +77,10 @@ func (s *Server) updateLinkContent(chatID int64, url, lastContent string) {
 }
 
 func (s *Server) monitorLinks() {
-	s.chatMutex.Lock()
-	defer s.chatMutex.Unlock()
+	s.ChatMutex.Lock()
+	defer s.ChatMutex.Unlock()
 
-	for chatID, chat := range s.chats {
+	for chatID, chat := range s.Chats {
 		for _, link := range chat.Links {
 			switch IsStackOverflowURL(link.URL) {
 			case true:
@@ -169,15 +169,15 @@ func (s *Server) RegisterChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.chatMutex.Lock()
-	defer s.chatMutex.Unlock()
+	s.ChatMutex.Lock()
+	defer s.ChatMutex.Unlock()
 
-	if _, exists := s.chats[id]; exists {
+	if _, exists := s.Chats[id]; exists {
 		http.Error(w, "Chat already exists.", http.StatusBadRequest)
 		return
 	}
 
-	s.chats[id] = &scrappertypes.Chat{ID: id, Links: []scrappertypes.LinkResponse{}}
+	s.Chats[id] = &scrappertypes.Chat{ID: id, Links: []scrappertypes.LinkResponse{}}
 	response := map[string]interface{}{"message": "Chat registered successfully", "id": id}
 
 	w.WriteHeader(http.StatusOK)
@@ -197,15 +197,15 @@ func (s *Server) DeleteChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.chatMutex.Lock()
-	defer s.chatMutex.Unlock()
+	s.ChatMutex.Lock()
+	defer s.ChatMutex.Unlock()
 
-	if _, exists := s.chats[id]; !exists {
+	if _, exists := s.Chats[id]; !exists {
 		http.Error(w, "Chat not found.", http.StatusNotFound)
 		return
 	}
 
-	delete(s.chats, id)
+	delete(s.Chats, id)
 
 	w.WriteHeader(http.StatusOK)
 }
@@ -219,10 +219,10 @@ func (s *Server) GetLinks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.chatMutex.Lock()
-	defer s.chatMutex.Unlock()
+	s.ChatMutex.Lock()
+	defer s.ChatMutex.Unlock()
 
-	chat, exists := s.chats[chatID]
+	chat, exists := s.Chats[chatID]
 	if !exists {
 		http.Error(w, "Chat not found.", http.StatusNotFound)
 		return
@@ -239,6 +239,8 @@ func (s *Server) GetLinks(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) AddLink(w http.ResponseWriter, r *http.Request) {
+	slog.Debug("In add Link in scrapper server")
+
 	chatIDStr := r.URL.Query().Get("Tg-Chat-Id")
 	chatID, err := strconv.ParseInt(chatIDStr, 10, 64)
 
@@ -248,7 +250,7 @@ func (s *Server) AddLink(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var request scrappertypes.AddLinkRequest
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+	if errDecode := json.NewDecoder(r.Body).Decode(&request); errDecode != nil {
 		http.Error(w, "Invalid request.", http.StatusBadRequest)
 		return
 	}
@@ -268,7 +270,7 @@ func (s *Server) AddLink(w http.ResponseWriter, r *http.Request) {
 	}
 
 	link := &scrappertypes.LinkResponse{
-		ID:          int64(len(s.chats[chatID].Links) + 1),
+		ID:          int64(len(s.Chats[chatID].Links) + 1),
 		URL:         request.Link,
 		Tags:        request.Tags,
 		Filters:     request.Filters,
@@ -276,18 +278,9 @@ func (s *Server) AddLink(w http.ResponseWriter, r *http.Request) {
 		LastChecked: time.Now(),
 	}
 
-	s.chatMutex.Lock()
-	defer s.chatMutex.Unlock()
+	errAppend := s.AppendLinkToLinks(chatID, link)
 
-	chat, exists := s.chats[chatID]
-	if !exists {
-		http.Error(w, "Chat not found.", http.StatusNotFound)
-		return
-	}
-
-	if !s.isURLInAdded(chatID, link.URL) {
-		chat.Links = append(chat.Links, *link)
-	} else {
+	if errAppend != nil {
 		update := bottypes.LinkUpdate{
 			ID:          link.ID,
 			URL:         link.URL,
@@ -295,7 +288,7 @@ func (s *Server) AddLink(w http.ResponseWriter, r *http.Request) {
 			TgChatIDs:   []int64{chatID},
 		}
 
-		err := s.botClient.sendUpdate(update)
+		err := s.BotClient.SendUpdate(update)
 		if err != nil {
 			return
 		}
@@ -304,12 +297,30 @@ func (s *Server) AddLink(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 }
 
-func (s *Server) isURLInAdded(id int64, u string) bool {
-	if len(s.chats[id].Links) == 0 {
+func (s *Server) AppendLinkToLinks(chatID int64, link *scrappertypes.LinkResponse) error {
+	s.ChatMutex.Lock()
+	defer s.ChatMutex.Unlock()
+
+	chat, exists := s.Chats[chatID]
+	if !exists {
+		return e.ErrChatNotFound
+	}
+
+	if !s.IsURLInAdded(chatID, link.URL) {
+		chat.Links = append(chat.Links, *link)
+	} else {
+		return e.ErrLinkAlreadyExists
+	}
+
+	return nil
+}
+
+func (s *Server) IsURLInAdded(id int64, u string) bool {
+	if len(s.Chats[id].Links) == 0 {
 		return false
 	}
 
-	for _, l := range s.chats[id].Links {
+	for _, l := range s.Chats[id].Links {
 		if l.URL == u {
 			return true
 		}
@@ -333,10 +344,10 @@ func (s *Server) RemoveLink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.chatMutex.Lock()
-	defer s.chatMutex.Unlock()
+	s.ChatMutex.Lock()
+	defer s.ChatMutex.Unlock()
 
-	chat, exists := s.chats[chatID]
+	chat, exists := s.Chats[chatID]
 	if !exists {
 		http.Error(w, "Chat not found.", http.StatusNotFound)
 		return

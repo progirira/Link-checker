@@ -11,6 +11,10 @@ import (
 	"net/url"
 )
 
+type HTTPBotClient interface {
+	SendUpdate(update bottypes.LinkUpdate) (err error)
+}
+
 type BotClient struct {
 	scheme   string
 	host     string
@@ -25,7 +29,7 @@ func NewBotClient(scheme, host, basePath string) *BotClient {
 	}
 }
 
-func (c *BotClient) sendUpdate(update bottypes.LinkUpdate) (err error) {
+func (c *BotClient) SendUpdate(update bottypes.LinkUpdate) (err error) {
 	u := url.URL{
 		Scheme: c.scheme,
 		Host:   c.host,
@@ -43,16 +47,6 @@ func (c *BotClient) sendUpdate(update bottypes.LinkUpdate) (err error) {
 	}
 
 	resp, errDoReq := http.Post(u.String(), "application/json", bytes.NewBuffer(jsonData))
-
-	errClose := resp.Body.Close()
-	if errClose != nil {
-		slog.Error(
-			e.ErrCloseBody.Error(),
-			slog.String("error", errClose.Error()),
-		)
-
-		return e.ErrCloseBody
-	}
 
 	if errDoReq != nil {
 		slog.Error(
@@ -82,6 +76,16 @@ func (c *BotClient) sendUpdate(update bottypes.LinkUpdate) (err error) {
 		)
 
 		return e.ErrAPI
+	}
+
+	errClose := resp.Body.Close()
+	if errClose != nil {
+		slog.Error(
+			e.ErrCloseBody.Error(),
+			slog.String("error", errClose.Error()),
+		)
+
+		return e.ErrCloseBody
 	}
 
 	return nil

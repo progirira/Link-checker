@@ -10,7 +10,7 @@ import (
 func SetNewLogger(filename string) (err error) {
 	file, err := os.OpenFile(filename, os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
-		return fmt.Errorf("log file %w: %v", e.ErrOpenFile, filename)
+		return fmt.Errorf("log file %w %w: %v", e.ErrOpenFile, err, filename)
 	}
 
 	logger := NewLogger(file)

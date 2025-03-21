@@ -10,6 +10,14 @@ import (
 	"net/url"
 )
 
+type HTTPScrapperClient interface {
+	RegisterChat(id int64)
+	DeleteChat(id int64)
+	AddLink(chatID int64, request scrappertypes.AddLinkRequest) (*scrappertypes.LinkResponse, error)
+	GetLinks(chatID int64) (*scrappertypes.ListLinksResponse, error)
+	RemoveLink(chatID int64, request scrappertypes.RemoveLinkRequest) (*scrappertypes.LinkResponse, error)
+}
+
 type ScrapperClient struct {
 	client http.Client
 	scheme string
@@ -119,10 +127,10 @@ func (c *ScrapperClient) doWithLink(method string, chatID int64, body []byte) (*
 
 	var linkResponse scrappertypes.LinkResponse
 
-	if ErrDecode := json.NewDecoder(responseBody).Decode(&linkResponse); ErrDecode != nil {
+	if errDecode := json.NewDecoder(responseBody).Decode(&linkResponse); errDecode != nil {
 		slog.Error(
 			e.ErrDecodeJSONBody.Error(),
-			slog.String("error", ErrDecode.Error()),
+			slog.String("error", errDecode.Error()),
 		)
 
 		return nil, e.ErrDecodeJSONBody

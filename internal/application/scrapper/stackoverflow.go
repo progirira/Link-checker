@@ -19,7 +19,7 @@ type item struct {
 }
 
 func IsStackOverflowURL(url string) bool {
-	return len(url) >= 25 && url[:25] == "https://stackoverflow.com"
+	return len(url) > 25 && url[:25] == "https://stackoverflow.com"
 }
 
 func GetStackOverflowUpdates(link string) (str string, err error) {

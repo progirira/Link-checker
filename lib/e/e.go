@@ -22,11 +22,15 @@ var (
 
 	ErrNoOwnerAndRepoInPath = errors.New("no owner and repository in URL")
 	ErrNoRepoInPath         = errors.New("repository is not specified in URL")
-	ErrStackoverflowAPI     = errors.New("stackoverflow API error")
 	ErrAPI                  = errors.New("API returned error")
 	ErrReadBody             = errors.New("read body error")
 	ErrCloseBody            = errors.New("close body error")
 
 	ErrServerFailed = errors.New("server failed")
 	ErrScheduler    = errors.New("scheduler error")
+
+	ErrChatNotFound      = errors.New("chat not found")
+	ErrLinkAlreadyExists = errors.New("link already exists")
+	ErrChatAlreadyExists = errors.New("link already exists")
+	ErrInvalidChatID     = errors.New("invalid chat id")
 )
