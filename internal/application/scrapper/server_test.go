@@ -138,7 +138,9 @@ func TestAppendLinkToLinks_HappyPath(t *testing.T) {
 				t.Errorf("Incorrect answer, got: %v; expected %v in case %v", err, nil, testCase.name)
 			}
 
+			s.ChatMutex.Lock()
 			chat, exists := s.Chats[testCase.chatID]
+			s.ChatMutex.Unlock()
 			assert.True(t, exists, "Chat must exist")
 
 			var found bool

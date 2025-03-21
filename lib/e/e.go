@@ -26,6 +26,7 @@ var (
 	ErrReadBody             = errors.New("read body error")
 	ErrCloseBody            = errors.New("close body error")
 
+	ErrWrite        = errors.New("write error")
 	ErrServerFailed = errors.New("server failed")
 	ErrScheduler    = errors.New("scheduler error")
 

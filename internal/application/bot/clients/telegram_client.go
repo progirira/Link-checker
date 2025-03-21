@@ -21,18 +21,18 @@ type HTTPTelegramClient interface {
 }
 
 type TelegramClient struct {
-	scheme   string
-	host     string
-	basePath string
-	client   http.Client
+	Scheme   string
+	Host     string
+	BasePath string
+	Client   http.Client
 }
 
 func NewTelegramClient(scheme, host, token string) TelegramClient {
 	return TelegramClient{
-		scheme:   scheme,
-		host:     host,
-		basePath: newBasePath(token),
-		client:   http.Client{},
+		Scheme:   scheme,
+		Host:     host,
+		BasePath: newBasePath(token),
+		Client:   http.Client{},
 	}
 }
 
@@ -45,7 +45,7 @@ func (c *TelegramClient) Updates(offset, limit int) ([]byte, error) {
 	q.Add("offset", strconv.Itoa(offset))
 	q.Add("limit", strconv.Itoa(limit))
 
-	body, errDoReq := DoRequest(c.client, http.MethodGet, c.scheme, c.host, path.Join(c.basePath, getUpdatesMethod), q, nil)
+	body, errDoReq := DoRequest(c.Client, http.MethodGet, c.Scheme, c.Host, path.Join(c.BasePath, getUpdatesMethod), q, nil)
 	if errDoReq != nil {
 		slog.Error(
 			e.ErrDoRequest.Error(),
@@ -73,7 +73,7 @@ func (c *TelegramClient) SendMessage(chatID int, text string) error {
 	q.Add("chat_id", strconv.Itoa(chatID))
 	q.Add("text", text)
 
-	_, errDoReq := DoRequest(c.client, http.MethodGet, c.scheme, c.host, path.Join(c.basePath, sendMessageMethod), q, nil)
+	_, errDoReq := DoRequest(c.Client, http.MethodGet, c.Scheme, c.Host, path.Join(c.BasePath, sendMessageMethod), q, nil)
 	if errDoReq != nil {
 		slog.Error(
 			e.ErrDoRequest.Error(),
