@@ -2,6 +2,7 @@ package clients
 
 import (
 	scrappertypes "go-progira/internal/domain/types/scrapper_types"
+	telegramtypes "go-progira/internal/domain/types/telegram_types"
 
 	"github.com/stretchr/testify/mock"
 )
@@ -18,6 +19,12 @@ func (m *MockTgClient) Updates(offset, limit int) ([]byte, error) {
 
 func (m *MockTgClient) SendMessage(id int, msg string) error {
 	args := m.Called(id, msg)
+
+	return args.Error(0)
+}
+
+func (m *MockTgClient) SetBotCommands(commands []telegramtypes.BotCommand) error {
+	args := m.Called(commands)
 
 	return args.Error(0)
 }

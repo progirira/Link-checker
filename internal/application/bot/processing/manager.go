@@ -7,6 +7,7 @@ import (
 	botmessages "go-progira/internal/domain/bot_messages"
 	scrappertypes "go-progira/internal/domain/types/scrapper_types"
 	telegramtypes "go-progira/internal/domain/types/telegram_types"
+	"log/slog"
 	"net/url"
 	"strings"
 )
@@ -51,6 +52,21 @@ func (m Manager) HandleAwaitingStart(id int, text string) {
 
 		err := m.TgClient.SendMessage(id, botmessages.MsgHello)
 		if err != nil {
+			return
+		}
+
+		commands := []telegramtypes.BotCommand{
+			{Command: "/track", Description: "Начать отслеживать ссылку"},
+			{Command: "/untrack", Description: "Перестать отслеживать ссылку"},
+			{Command: "/list", Description: "Показать отслеживаемые ссылки"},
+			{Command: "/help", Description: "Справка"},
+		}
+
+		errSet := m.TgClient.SetBotCommands(commands)
+		if errSet != nil {
+			slog.Error("Setting bot commands wasn't worked successfully")
+			slog.String("error", errSet.Error())
+
 			return
 		}
 	case "/help":
@@ -201,6 +217,17 @@ func (m *Manager) getUserState(id int) State {
 }
 
 func (m Manager) Start() {
+	commands := []telegramtypes.BotCommand{
+		{Command: "/start", Description: "Запуск бота"},
+		{Command: "/help", Description: "Справка"},
+	}
+
+	err := m.TgClient.SetBotCommands(commands)
+	if err != nil {
+		slog.Error("Setting bot commands wasn't worked successfully")
+		slog.String("error", err.Error())
+	}
+
 	m.buildHandlers()
 
 	var offset int

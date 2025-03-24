@@ -33,7 +33,8 @@ func TestDoRequest_Success(t *testing.T) {
 
 	parsedURL, _ := url.Parse(server.URL)
 
-	resp, err := clients.DoRequest(client, http.MethodGet, parsedURL.Scheme, parsedURL.Host, "/", nil, nil)
+	resp, err := clients.DoRequest(client, http.MethodGet, parsedURL.Scheme, parsedURL.Host, "/",
+		nil, nil, false)
 	assert.NoError(t, err)
 
 	body, err := io.ReadAll(resp)
@@ -45,7 +46,8 @@ func TestDoRequest_Success(t *testing.T) {
 func TestDoRequest_BadURL(t *testing.T) {
 	client := http.Client{}
 
-	_, err := clients.DoRequest(client, http.MethodGet, "http", ":", "/", nil, nil)
+	_, err := clients.DoRequest(client, http.MethodGet, "http", ":", "/",
+		nil, nil, false)
 
 	assert.Error(t, err)
 }
@@ -59,6 +61,7 @@ func TestDoRequest_ClientError(t *testing.T) {
 		},
 	}
 
-	_, err := clients.DoRequest(brokenClient, http.MethodGet, "http", "localhost", "/", nil, nil)
+	_, err := clients.DoRequest(brokenClient, http.MethodGet, "http", "localhost", "/",
+		nil, nil, false)
 	assert.Error(t, err)
 }

@@ -9,7 +9,7 @@ import (
 	"net/url"
 )
 
-func DoRequest(client http.Client, method, scheme, host, path string, query url.Values, body []byte) (io.ReadCloser, error) {
+func DoRequest(client http.Client, method, scheme, host, path string, q url.Values, body []byte, isJSON bool) (io.ReadCloser, error) {
 	u := url.URL{
 		Scheme: scheme,
 		Host:   host,
@@ -29,7 +29,11 @@ func DoRequest(client http.Client, method, scheme, host, path string, query url.
 		return nil, e.ErrMakeRequest
 	}
 
-	req.URL.RawQuery = query.Encode()
+	if isJSON {
+		req.Header.Set("Content-Type", "application/json")
+	}
+
+	req.URL.RawQuery = q.Encode()
 
 	resp, errDoReq := client.Do(req)
 	if errDoReq != nil {

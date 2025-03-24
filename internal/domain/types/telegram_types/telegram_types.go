@@ -23,3 +23,8 @@ type From struct {
 type Chat struct {
 	ID int `json:"id"`
 }
+
+type BotCommand struct {
+	Command     string `json:"command"`
+	Description string `json:"description"`
+}

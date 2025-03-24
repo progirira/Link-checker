@@ -43,7 +43,7 @@ func (c *ScrapperClient) DeleteChat(id int64) {
 func (c *ScrapperClient) doWithChat(method string, id int64, debugMes string) {
 	u := fmt.Sprintf("/tg-chat/%d", id)
 
-	_, err := DoRequest(c.client, method, "http", c.host, u, url.Values{}, nil)
+	_, err := DoRequest(c.client, method, "http", c.host, u, url.Values{}, nil, false)
 	if err != nil {
 		slog.Debug(
 			e.ErrDoRequest.Error(),
@@ -58,7 +58,7 @@ func (c *ScrapperClient) GetLinks(chatID int64) (*scrappertypes.ListLinksRespons
 	q := url.Values{}
 	q.Add("Tg-Chat-Id", fmt.Sprintf("%d", chatID))
 
-	responseBody, errDoReq := DoRequest(c.client, http.MethodGet, c.scheme, c.host, u, q, nil)
+	responseBody, errDoReq := DoRequest(c.client, http.MethodGet, c.scheme, c.host, u, q, nil, false)
 	if errDoReq != nil {
 		slog.Error(
 			e.ErrDoRequest.Error(),
@@ -115,7 +115,7 @@ func (c *ScrapperClient) doWithLink(method string, chatID int64, body []byte) (*
 	q.Add("Tg-Chat-Id", fmt.Sprintf("%d", chatID))
 	q.Add("Content-Type", "application/json")
 
-	responseBody, errDoReq := DoRequest(c.client, method, c.scheme, c.host, u, q, body)
+	responseBody, errDoReq := DoRequest(c.client, method, c.scheme, c.host, u, q, body, false)
 	if errDoReq != nil {
 		slog.Error(
 			e.ErrDoRequest.Error(),
