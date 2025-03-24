@@ -5,6 +5,7 @@ import (
 	"go-progira/internal/application/bot/processing"
 	botmessages "go-progira/internal/domain/bot_messages"
 	scrappertypes "go-progira/internal/domain/types/scrapper_types"
+	telegramtypes "go-progira/internal/domain/types/telegram_types"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -40,6 +41,14 @@ func TestHandleAwaitingStart_Start(t *testing.T) {
 		assert.Equal(t, processing.StateAwaitingStart, manager.States[testCase.chatID])
 		mockScrap.On("RegisterChat", int64(testCase.chatID)).Return()
 		mockTg.On("SendMessage", testCase.chatID, botmessages.MsgHello).Return(nil)
+
+		commands := []telegramtypes.BotCommand{
+			{Command: "/track", Description: "Начать отслеживать ссылку"},
+			{Command: "/untrack", Description: "Перестать отслеживать ссылку"},
+			{Command: "/list", Description: "Показать отслеживаемые ссылки"},
+			{Command: "/help", Description: "Справка"},
+		}
+		mockTg.On("SetBotCommands", commands).Return(nil)
 
 		manager.HandleAwaitingStart(testCase.chatID, "/start")
 
