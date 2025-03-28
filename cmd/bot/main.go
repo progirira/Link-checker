@@ -99,7 +99,7 @@ func getByKeyFromEnv(key string) (string, error) {
 }
 
 func main() {
-	fileForLogs := "logs/bot_logs"
+	fileForLogs := "logs/bot_logs.txt"
 
 	loggerErr := domain.SetNewLogger(fileForLogs)
 	if errors.Is(loggerErr, e.ErrOpenFile) {

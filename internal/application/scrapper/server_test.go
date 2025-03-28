@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"go-progira/internal/application/scrapper"
+	"go-progira/internal/application/scrapper/storage"
 	scrappertypes "go-progira/internal/domain/types/scrapper_types"
 	"go-progira/lib/e"
 	"io"
@@ -21,8 +22,9 @@ import (
 )
 
 func TestRegisterChat(t *testing.T) {
+	dict := &storage.DictionaryStorage{Chats: make(map[int64]*scrappertypes.Chat)}
 	s := &scrapper.Server{
-		Chats:     make(map[int64]*scrappertypes.Chat),
+		Storage:   dict,
 		ChatMutex: sync.Mutex{},
 	}
 
@@ -64,8 +66,9 @@ func TestRegisterChat(t *testing.T) {
 		t.Errorf("Incorrect message, got: %v; expected %v", response["message"], expectedAnswer)
 	}
 
-	_, exists := s.Chats[chatID]
-	if !exists {
+	_, err := s.Storage.GetLinks(chatID)
+
+	if errors.Is(err, e.ErrChatNotFound) {
 		t.Errorf("Chat not registered")
 	}
 
@@ -90,8 +93,9 @@ func TestRegisterChat(t *testing.T) {
 }
 
 func TestIsURLInAdded(t *testing.T) {
+	dict := &storage.DictionaryStorage{Chats: make(map[int64]*scrappertypes.Chat)}
 	s := &scrapper.Server{
-		Chats:     make(map[int64]*scrappertypes.Chat),
+		Storage:   dict,
 		ChatMutex: sync.Mutex{},
 	}
 
@@ -102,17 +106,17 @@ func TestIsURLInAdded(t *testing.T) {
 
 	s.RegisterChat(w, req)
 
-	if s.IsURLInAdded(chatID, u) != false {
-		t.Errorf("Incorrect value, got: %v; expected %v", s.IsURLInAdded(chatID, u), false)
+	if s.Storage.IsURLInAdded(chatID, u) {
+		t.Errorf("Incorrect value, got: %v; expected %v", s.Storage.IsURLInAdded(chatID, u), false)
 	}
 
-	chat := s.Chats[chatID]
-	link := scrappertypes.LinkResponse{URL: u}
+	errAdd := s.Storage.AddLink(chatID, u, []string{}, []string{}, "")
+	if errAdd != nil {
+		t.Errorf("Incorrect value, got: %v; expected %v", s.Storage.IsURLInAdded(chatID, u), true)
+	}
 
-	chat.Links = append(chat.Links, link)
-
-	if s.IsURLInAdded(chatID, u) != true {
-		t.Errorf("Incorrect value, got: %v; expected %v", s.IsURLInAdded(chatID, u), true)
+	if !s.Storage.IsURLInAdded(chatID, u) {
+		t.Errorf("Incorrect value, got: %v; expected %v", s.Storage.IsURLInAdded(chatID, u), true)
 	}
 }
 
@@ -144,8 +148,9 @@ func TestAppendLinkToLinks_HappyPath(t *testing.T) {
 		},
 	}
 
+	dict := &storage.DictionaryStorage{Chats: make(map[int64]*scrappertypes.Chat)}
 	s := &scrapper.Server{
-		Chats:     make(map[int64]*scrappertypes.Chat),
+		Storage:   dict,
 		ChatMutex: sync.Mutex{},
 	}
 
@@ -158,19 +163,22 @@ func TestAppendLinkToLinks_HappyPath(t *testing.T) {
 
 			s.RegisterChat(w, req)
 
-			err := s.AppendLinkToLinks(testCase.chatID, &testCase.link)
+			err := s.Storage.AddLink(testCase.chatID, testCase.link.URL, testCase.link.Tags, testCase.link.Filters, "")
 			if err != nil {
 				t.Errorf("Incorrect answer, got: %v; expected %v in case %v", err, nil, testCase.name)
 			}
 
 			s.ChatMutex.Lock()
-			chat, exists := s.Chats[testCase.chatID]
-			s.ChatMutex.Unlock()
-			assert.True(t, exists, "Chat must exist")
+			defer s.ChatMutex.Unlock()
 
 			var found bool
 
-			for _, link := range chat.Links {
+			links, errGet := s.Storage.GetLinks(testCase.chatID)
+			if errGet != nil {
+				t.Errorf("Incorrect answer, got: %v; expected %v in case %v", errGet, nil, testCase.name)
+			}
+
+			for _, link := range links {
 				if link.URL == testCase.link.URL {
 					assert.ElementsMatch(t, link.Tags, testCase.link.Tags, "Tags do not match")
 					assert.ElementsMatch(t, link.Filters, testCase.link.Filters, "Filters do not match")
@@ -195,7 +203,7 @@ func TestAppendLinkToLinks_ChatNotFound(t *testing.T) {
 
 	testCases := []TestCase{
 		{
-			name:   "chat registered, no errors expected, link must be added",
+			name:   "chat was not registered, link must be non-added",
 			chatID: int64(12345),
 			link: &scrappertypes.LinkResponse{ID: 1,
 				URL:     "its.url",
@@ -203,31 +211,19 @@ func TestAppendLinkToLinks_ChatNotFound(t *testing.T) {
 				Filters: []string{"sister", "wife"},
 			},
 		},
-		{
-			name:   "chat was not registered, no errors expected, link must be non-added",
-			chatID: int64(12346),
-			link: &scrappertypes.LinkResponse{ID: 2,
-				URL:     "its.another.url",
-				Tags:    []string{"work2", "hobby2"},
-				Filters: []string{"sister2", "wife2"},
-			},
-		},
 	}
 
+	dict := &storage.DictionaryStorage{Chats: make(map[int64]*scrappertypes.Chat)}
 	s := &scrapper.Server{
-		Chats:     make(map[int64]*scrappertypes.Chat),
+		Storage:   dict,
 		ChatMutex: sync.Mutex{},
 	}
 
 	for _, testCase := range testCases {
-		t.Run(testCase.name, func(tt *testing.T) {
-			tt.Parallel()
-
-			err := s.AppendLinkToLinks(testCase.chatID, testCase.link)
-			if !errors.Is(err, e.ErrChatNotFound) {
-				t.Errorf("Incorrect answer, got: %v; expected %v in case %v", err, e.ErrChatNotFound, testCase.name)
-			}
-		})
+		err := s.Storage.AddLink(testCase.chatID, testCase.link.URL, testCase.link.Tags, testCase.link.Filters, "")
+		if !errors.Is(err, e.ErrChatNotFound) {
+			t.Errorf("Incorrect answer, got: %v; expected %v in case %v", err, e.ErrChatNotFound, testCase.name)
+		}
 	}
 }
 
@@ -255,8 +251,9 @@ func TestTwiceAppendLinkToLinks(t *testing.T) {
 		},
 	}
 
+	dict := &storage.DictionaryStorage{Chats: make(map[int64]*scrappertypes.Chat)}
 	s := &scrapper.Server{
-		Chats:     make(map[int64]*scrappertypes.Chat),
+		Storage:   dict,
 		ChatMutex: sync.Mutex{},
 	}
 
@@ -266,15 +263,15 @@ func TestTwiceAppendLinkToLinks(t *testing.T) {
 
 		s.RegisterChat(w, req)
 
-		err := s.AppendLinkToLinks(testCase.chatID, &testCase.listLinks.Links[0])
+		err := s.Storage.AddLink(testCase.chatID, testCase.listLinks.Links[0].URL, []string{}, []string{}, "")
 		if err != nil {
 			t.Errorf("Incorrect error adding first time, got: %v; expected %v with url:  %v", err,
 				nil, &testCase.listLinks.Links[0].URL)
 		}
 
-		err = s.AppendLinkToLinks(testCase.chatID, &testCase.listLinks.Links[1])
+		err = s.Storage.AddLink(testCase.chatID, testCase.listLinks.Links[1].URL, []string{}, []string{}, "")
 		if !errors.Is(err, e.ErrLinkAlreadyExists) {
-			t.Errorf("Incorrect error adding first time, got: %v; expected %v with url:  %v", err,
+			t.Errorf("Incorrect error adding second time, got: %v; expected %v with url:  %v", err,
 				e.ErrLinkAlreadyExists, &testCase.listLinks.Links[1].URL)
 		}
 	}
@@ -288,43 +285,69 @@ func TestRemoveLink(t *testing.T) {
 		expected         []scrappertypes.LinkResponse
 	}
 
-	listLinks := []scrappertypes.LinkResponse{
-		{URL: "link1", Tags: []string{"tag1", "tag2"}, Filters: []string{"filter1", "filter2"}},
-		{URL: "link2", Tags: []string{"tag3", "tag4"}, Filters: []string{"filter3", "filter4"}},
-		{URL: "link3", Tags: []string{"tag5", "tag6"}, Filters: []string{"filter5", "filter6"}},
-	}
-
 	testCases := []TestCase{
 		{
 			name:             "deleting from the beginning of list",
 			indexToBeDeleted: 0,
-			given:            append([]scrappertypes.LinkResponse(nil), listLinks...),
-			expected:         append([]scrappertypes.LinkResponse(nil), listLinks[1:]...),
+			given: []scrappertypes.LinkResponse{
+				{URL: "link1", Tags: []string{"tag1", "tag2"}, Filters: []string{"filter1", "filter2"}},
+				{URL: "link2", Tags: []string{"tag3", "tag4"}, Filters: []string{"filter3", "filter4"}},
+				{URL: "link3", Tags: []string{"tag5", "tag6"}, Filters: []string{"filter5", "filter6"}},
+			},
+			expected: []scrappertypes.LinkResponse{
+				{URL: "link2", Tags: []string{"tag3", "tag4"}, Filters: []string{"filter3", "filter4"}},
+				{URL: "link3", Tags: []string{"tag5", "tag6"}, Filters: []string{"filter5", "filter6"}},
+			},
 		},
 		{
 			name:             "deleting from the middle of list",
 			indexToBeDeleted: 1,
-			given:            append([]scrappertypes.LinkResponse(nil), listLinks...),
-			expected:         append([]scrappertypes.LinkResponse(nil), append(listLinks[:1], listLinks[2:]...)...),
+			given: []scrappertypes.LinkResponse{
+				{URL: "link1", Tags: []string{"tag1", "tag2"}, Filters: []string{"filter1", "filter2"}},
+				{URL: "link2", Tags: []string{"tag3", "tag4"}, Filters: []string{"filter3", "filter4"}},
+				{URL: "link3", Tags: []string{"tag5", "tag6"}, Filters: []string{"filter5", "filter6"}},
+			},
+			expected: []scrappertypes.LinkResponse{
+				{URL: "link1", Tags: []string{"tag1", "tag2"}, Filters: []string{"filter1", "filter2"}},
+				{URL: "link3", Tags: []string{"tag5", "tag6"}, Filters: []string{"filter5", "filter6"}},
+			},
 		},
 		{
 			name:             "deleting from the end of list",
 			indexToBeDeleted: 2,
-			given:            append([]scrappertypes.LinkResponse(nil), listLinks...),
-			expected:         append([]scrappertypes.LinkResponse(nil), listLinks[:2]...),
+			given: []scrappertypes.LinkResponse{
+				{URL: "link1", Tags: []string{"tag1", "tag2"}, Filters: []string{"filter1", "filter2"}},
+				{URL: "link2", Tags: []string{"tag3", "tag4"}, Filters: []string{"filter3", "filter4"}},
+				{URL: "link3", Tags: []string{"tag5", "tag6"}, Filters: []string{"filter5", "filter6"}},
+			},
+			expected: []scrappertypes.LinkResponse{
+				{URL: "link1", Tags: []string{"tag1", "tag2"}, Filters: []string{"filter1", "filter2"}},
+				{URL: "link2", Tags: []string{"tag3", "tag4"}, Filters: []string{"filter3", "filter4"}},
+			},
 		},
 	}
 
-	for _, testCase := range testCases {
+	for i, testCase := range testCases {
+		dict := &storage.DictionaryStorage{Chats: make(map[int64]*scrappertypes.Chat)}
 		server := &scrapper.Server{
-			Chats:     make(map[int64]*scrappertypes.Chat),
+			Storage:   dict,
 			ChatMutex: sync.Mutex{},
 			BotClient: new(scrapper.MockBotClient),
 		}
 
-		chatID := int64(12345)
-		server.Chats[chatID] = &scrappertypes.Chat{}
-		server.Chats[chatID].Links = testCase.given
+		chatID := int64(12345 + i)
+
+		err := server.Storage.CreateChat(chatID)
+		if err != nil {
+			t.Errorf("Incorrect error, got: %v; expected %v", err, nil)
+		}
+
+		for _, link := range testCase.given {
+			errAdd := server.Storage.AddLink(chatID, link.URL, link.Tags, link.Filters, "")
+			if errAdd != nil {
+				t.Errorf("Incorrect error adding, got: %v; expected %v in case %v", errAdd, nil, testCase.name)
+			}
+		}
 
 		delReq := scrappertypes.RemoveLinkRequest{Link: testCase.given[testCase.indexToBeDeleted].URL}
 		body, _ := json.Marshal(delReq)
@@ -341,15 +364,25 @@ func TestRemoveLink(t *testing.T) {
 
 		resp := w.Result()
 
-		err := resp.Body.Close()
+		err = resp.Body.Close()
 		if err != nil {
 			t.Errorf("Some error while testing: %v", e.ErrCloseBody)
 		}
 
+		links, errGet := server.Storage.GetLinks(chatID)
+		if errGet != nil {
+			t.Errorf("Incorrect answer, got: %v; expected %v in case %v", errGet, nil, testCase.name)
+		}
+
+		if len(links) != len(testCase.expected) {
+			t.Errorf("Incorrect length, got: %v; expected %v", len(links), len(testCase.expected))
+			return
+		}
+
 		for i, elem := range testCase.expected {
-			if elem.URL != server.Chats[chatID].Links[i].URL {
+			if elem.URL != links[i].URL {
 				t.Errorf("Incorrect deleting, different values in index: %d; got: %v; expected %v",
-					testCase.indexToBeDeleted, server.Chats[chatID].Links[i].URL, elem.URL)
+					testCase.indexToBeDeleted, links[i].URL, elem.URL)
 			}
 		}
 	}

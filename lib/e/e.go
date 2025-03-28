@@ -31,6 +31,7 @@ var (
 	ErrScheduler    = errors.New("scheduler error")
 
 	ErrChatNotFound      = errors.New("chat not found")
-	ErrLinkAlreadyExists = errors.New("link already exists")
 	ErrChatAlreadyExists = errors.New("link already exists")
+	ErrLinkNotFound      = errors.New("link not found")
+	ErrLinkAlreadyExists = errors.New("link already exists")
 )

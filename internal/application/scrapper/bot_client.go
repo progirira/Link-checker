@@ -52,6 +52,7 @@ func (c *BotClient) SendUpdate(update bottypes.LinkUpdate) (err error) {
 		slog.Error(
 			e.ErrDoRequest.Error(),
 			slog.String("error", errDoReq.Error()),
+			slog.String("url", u.String()),
 		)
 
 		return e.ErrDoRequest

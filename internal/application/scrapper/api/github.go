@@ -1,4 +1,4 @@
-package scrapper
+package api
 
 import (
 	"encoding/json"

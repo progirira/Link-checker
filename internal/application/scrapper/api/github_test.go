@@ -1,8 +1,8 @@
-package scrapper_test
+package api_test
 
 import (
 	"errors"
-	"go-progira/internal/application/scrapper"
+	"go-progira/internal/application/scrapper/api"
 	"go-progira/lib/e"
 	"testing"
 )
@@ -43,7 +43,7 @@ func TestIsGithubURL(t *testing.T) {
 		t.Run(testCase.name, func(tt *testing.T) {
 			tt.Parallel()
 
-			answer := scrapper.IsGitHubURL(testCase.given)
+			answer := api.IsGitHubURL(testCase.given)
 			if answer != testCase.expected {
 				t.Errorf("Incorrect answer on isGithubURL, got: %v; expected %v  in case with url %s", answer, testCase.expected, testCase.given)
 			}
@@ -88,7 +88,7 @@ func TestGetOwnerAndRepo(t *testing.T) {
 		t.Run(testCase.name, func(tt *testing.T) {
 			tt.Parallel()
 
-			owner, repo, err := scrapper.GetOwnerAndRepo(testCase.given)
+			owner, repo, err := api.GetOwnerAndRepo(testCase.given)
 
 			if owner != testCase.expectedOwner {
 				t.Errorf("Incorrect owner was extracted, got: %s; expected %s; in case with url %s",

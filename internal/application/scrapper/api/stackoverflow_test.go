@@ -1,7 +1,7 @@
-package scrapper_test
+package api_test
 
 import (
-	"go-progira/internal/application/scrapper"
+	"go-progira/internal/application/scrapper/api"
 	"testing"
 )
 
@@ -41,7 +41,7 @@ func TestIsStackOverflowURL(t *testing.T) {
 		t.Run(testCase.name, func(tt *testing.T) {
 			tt.Parallel()
 
-			answer := scrapper.IsStackOverflowURL(testCase.given)
+			answer := api.IsStackOverflowURL(testCase.given)
 			if answer != testCase.expected {
 				t.Errorf("Incorrect answer on IsStackOverflowURL, got: %v; expected %v  in case with url %s", answer, testCase.expected, testCase.given)
 			}

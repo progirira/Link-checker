@@ -84,13 +84,11 @@ func sendErrorResponse(w http.ResponseWriter, desc, code, exceptionName, excepti
 }
 
 func (s *Server) Start() {
-	mux := http.NewServeMux()
-
-	mux.HandleFunc("/updates", s.handleUpdates)
+	http.HandleFunc("/updates", s.handleUpdates)
 
 	srv := &http.Server{
 		Addr:         ":8080",
-		Handler:      mux,
+		Handler:      nil,
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
 		IdleTimeout:  60 * time.Second,
