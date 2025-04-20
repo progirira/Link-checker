@@ -52,6 +52,8 @@ func (m Manager) HandleAwaitingStart(id int, text string) {
 
 		err := m.TgClient.SendMessage(id, botmessages.MsgHello)
 		if err != nil {
+			slog.Error("Error send mes to tg")
+			slog.String("error", err.Error())
 			return
 		}
 
@@ -262,8 +264,8 @@ func (m Manager) Start() {
 
 	err := m.TgClient.SetBotCommands(commands)
 	if err != nil {
-		slog.Error("Setting bot commands wasn't worked successfully")
-		slog.String("error", err.Error())
+		slog.Error(("Setting bot commands wasn't worked successfully"),
+			slog.String("error", err.Error()))
 	}
 
 	m.buildHandlers()

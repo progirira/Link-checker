@@ -1,0 +1,145 @@
+databaseChangeLog:
+  - changeSet:
+      id: 1
+      author: yourname
+      changes:
+        - createTable:
+            tableName: users
+            columns:
+              - column:
+                  name: id
+                  type: SERIAL
+                  constraints:
+                    primaryKey: true
+              - column:
+                  name: telegram_id
+                  type: BIGINT
+                  constraints:
+                    unique: true
+                    nullable: false
+
+        - createTable:
+            tableName: links
+            columns:
+              - column:
+                  name: id
+                  type: SERIAL
+                  constraints:
+                    primaryKey: true
+              - column:
+                  name: url
+                  type: TEXT
+                  constraints:
+                    unique: true
+                    nullable: false
+              - column:
+                  name: created_at
+                  type: TIMESTAMP
+                  defaultValueComputed: now()
+
+        - createTable:
+            tableName: link_users
+            columns:
+              - column:
+                  name: user_id
+                  type: INT
+                  constraints:
+                    primaryKey: true
+                    foreignKeyName: fk_link_users_user
+                    references: users(id)
+              - column:
+                  name: link_id
+                  type: INT
+                  constraints:
+                    primaryKey: true
+                    foreignKeyName: fk_link_users_link
+                    references: links(id)
+
+        - createTable:
+            tableName: filters
+            columns:
+              - column:
+                  name: id
+                  type: SERIAL
+                  constraints:
+                    primaryKey: true
+              - column:
+                  name: name
+                  type: TEXT
+                  constraints:
+                    unique: true
+                    nullable: false
+
+        - createTable:
+            tableName: link_filters
+            columns:
+              - column:
+                  name: link_id
+                  type: INT
+                  constraints:
+                    primaryKey: true
+                    foreignKeyName: fk_link_filters_link
+                    references: links(id)
+              - column:
+                  name: filter_id
+                  type: INT
+                  constraints:
+                    primaryKey: true
+                    foreignKeyName: fk_link_filters_filter
+                    references: filters(id)
+
+        - createTable:
+            tableName: tags
+            columns:
+              - column:
+                  name: id
+                  type: SERIAL
+                  constraints:
+                    primaryKey: true
+              - column:
+                  name: name
+                  type: TEXT
+                  constraints:
+                    unique: true
+                    nullable: false
+
+        - createTable:
+            tableName: link_tags
+            columns:
+              - column:
+                  name: link_id
+                  type: INT
+                  constraints:
+                    primaryKey: true
+                    foreignKeyName: fk_link_tags_link
+                    references: links(id)
+              - column:
+                  name: tag_id
+                  type: INT
+                  constraints:
+                    primaryKey: true
+                    foreignKeyName: fk_link_tags_tag
+                    references: tags(id)
+
+        - createTable:
+            tableName: updates
+            columns:
+              - column:
+                  name: link_id
+                  type: INT
+              - column:
+                  name: type
+                  type: TEXT
+                  constraints:
+                    nullable: false
+              - column:
+                  name: last_update_number
+                  type: INT
+              - column:
+                  name: created_at
+                  type: TIMESTAMP
+
+        - addUniqueConstraint:
+            tableName: updates
+            columnNames: link_id, type
+            constraintName: uq_updates_link_type

@@ -3,29 +3,19 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"go-progira/internal/domain/types/api_types"
 	"go-progira/pkg/e"
+	"log"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"strings"
+	"time"
 )
 
-type Commits []struct {
-	Sha string `json:"sha"`
-}
+type GithubUpdater struct{}
 
 func IsGitHubURL(url string) bool {
 	return len(url) >= 18 && url[:18] == "https://github.com"
-}
-
-func (c Commits) getGeneralSha() string {
-	sumSha := strings.Builder{}
-
-	for _, commit := range c {
-		sumSha.WriteString(commit.Sha)
-	}
-
-	return sumSha.String()
 }
 
 func GetOwnerAndRepo(link string) (owner, repo string, err error) {
@@ -47,54 +37,77 @@ func GetOwnerAndRepo(link string) (owner, repo string, err error) {
 	return owner, repo, nil
 }
 
-func GetGitHubUpdates(link string) (string, error) {
+func (updater *GithubUpdater) GetResponse(owner, repo, updateType string, prevUpdateTime time.Time) ([]api_types.GithubUpdate, error) {
+	log.Println("In GetNewUpdates function")
+
+	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/%s", owner, repo, updateType)
+
+	if !prevUpdateTime.IsZero() {
+		url += fmt.Sprintf("?date:>=%d", prevUpdateTime.Format(time.RFC3339))
+	}
+
+	resp, err := http.Get(url)
+	if err != nil {
+		slog.Error(err.Error())
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var result []api_types.GithubUpdate
+
+	if resp.StatusCode != http.StatusOK {
+		log.Println(resp.StatusCode, resp.Status)
+		return []api_types.GithubUpdate{}, nil
+	}
+
+	if errDecode := json.NewDecoder(resp.Body).Decode(&result); errDecode != nil {
+		slog.Error(
+			e.ErrDecodeJSONBody.Error(),
+			slog.String("error", errDecode.Error()),
+		)
+
+		return []api_types.GithubUpdate{}, e.ErrDecodeJSONBody
+	}
+
+	fmt.Println("len(newUpdates) ", len(result))
+
+	return result, nil
+}
+
+func (updater *GithubUpdater) GetUpdates(link string, prevUpdateTime time.Time) []api_types.GithubUpdate {
 	owner, repo, err := GetOwnerAndRepo(link)
 	if err != nil {
 		slog.Error(err.Error(),
 			slog.String("link", link),
 		)
 
-		return "", err
+		return []api_types.GithubUpdate{}
 	}
-
-	u := url.URL{
-		Scheme: "https",
-		Host:   "api.github.com",
-		Path:   fmt.Sprintf("repos/%s/%s/commits", owner, repo),
+	parts := strings.Split(link, "/")
+	if len(parts) < 6 {
+		log.Println("invalid github link: not enough parts")
+		return nil
 	}
+	updateType := parts[5]
 
-	req, errMakeReq := http.NewRequest(http.MethodGet, u.String(), http.NoBody)
-	if errMakeReq != nil {
-		slog.Error(
-			e.ErrMakeRequest.Error(),
-			slog.String("error", errMakeReq.Error()),
-			slog.String("function", "Github updates"),
-			slog.String("method", http.MethodGet),
-			slog.String("url", u.String()),
-		)
-
-		return "", e.ErrMakeRequest
-	}
-
-	body, err := doRequest(req)
+	updates, err := updater.GetResponse(owner, repo, updateType, prevUpdateTime)
 	if err != nil {
-		return "", err
+		log.Printf("Error getting updates from Github: %s", err.Error())
+		return []api_types.GithubUpdate{}
 	}
 
-	commits := Commits{}
+	var githubType api_types.GithubType
 
-	if errDecode := json.Unmarshal(body, &commits); errDecode != nil {
-		slog.Error(
-			e.ErrDecodeJSONBody.Error(),
-			slog.String("error", errDecode.Error()),
-		)
-
-		return "", e.ErrDecodeJSONBody
+	switch parts[5] {
+	case "pulls":
+		githubType = api_types.PR
+	case "issues":
+		githubType = api_types.Issue
 	}
 
-	if len(commits) > 0 {
-		return commits.getGeneralSha(), nil
+	for i := range updates {
+		updates[i].Type = githubType
 	}
 
-	return "", nil
+	return updates
 }

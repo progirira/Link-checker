@@ -117,6 +117,8 @@ func (c *TelegramClient) SendMessage(chatID int, text string) error {
 
 		return errDoReq
 	}
+	slog.Info("Sent message to tg",
+		slog.Int("chat_id", chatID))
 
 	return nil
 }

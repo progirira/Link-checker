@@ -87,14 +87,14 @@ func (s *Server) Start() {
 	http.HandleFunc("/updates", s.handleUpdates)
 
 	srv := &http.Server{
-		Addr:         ":8080",
+		Addr:         ":8090",
 		Handler:      nil,
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
 		IdleTimeout:  60 * time.Second,
 	}
 
-	slog.Debug("Starting server on :8080...")
+	slog.Debug("Starting server on :8090...")
 
 	go func() {
 		if err := srv.ListenAndServe(); err != nil {

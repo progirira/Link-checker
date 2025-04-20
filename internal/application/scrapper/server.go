@@ -1,13 +1,17 @@
 package scrapper
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"go-progira/internal/application/scrapper/api"
 	botmessages "go-progira/internal/domain/bot_messages"
+	"go-progira/internal/domain/types/api_types"
 	bottypes "go-progira/internal/domain/types/bot_types"
 	scrappertypes "go-progira/internal/domain/types/scrapper_types"
-	"go-progira/internal/repository/storage"
+	"go-progira/internal/formatter"
+	"go-progira/internal/repository/dictionary_storage"
+	"go-progira/pkg/config"
 	"go-progira/pkg/e"
 	"log/slog"
 	"net/http"
@@ -19,21 +23,21 @@ import (
 )
 
 type Server struct {
-	Storage   storage.Storage
+	Storage   repository.Storage
 	BotClient HTTPBotClient
 }
 
-func NewServer(storage storage.Storage, client HTTPBotClient) *Server {
+func NewServer(storage repository.Storage, client HTTPBotClient) *Server {
 	return &Server{
 		Storage:   storage,
 		BotClient: client,
 	}
 }
 
-func (s *Server) Start() {
+func (s *Server) Start(batch int) {
 	http.HandleFunc("/tg-chat/{id}", s.ChatHandler)
 	http.HandleFunc("/links", s.LinksHandler)
-	s.startScheduler()
+	s.startScheduler(batch)
 
 	slog.Debug("Starting server on :8090...")
 
@@ -53,24 +57,109 @@ func (s *Server) Start() {
 	}
 }
 
-func (s *Server) monitorLinks() {
-	updates := s.Storage.Update()
+func (s *Server) monitorLinks(batch int) {
+	ctx := context.Background()
 
-	if len(updates) > 0 {
-		for _, upd := range updates {
-			err := s.BotClient.SendUpdate(upd)
+	links, lastID := s.Storage.GetBatchOfLinks(ctx, batch, int64(0))
+
+	for len(links) != 0 {
+		for _, link := range links {
+			prevTime := s.Storage.GetPreviousUpdate(ctx, link.ID)
+
+			var msg string
+
+			if api.IsStackOverflowURL(link.URL) {
+				envData, errLoadEnv := config.Set(".env")
+				if errLoadEnv != nil {
+					return
+				}
+
+				apiKey, _ := envData.GetByKeyFromEnv("STACKOVERFLOW_API_KEY")
+				updater := api.StackoverflowUpdater{Key: apiKey}
+
+				updates, _ := s.saveStackoverflowUpdates(ctx, updater, link.ID, link.URL, prevTime)
+
+				if len(updates) == 0 {
+					continue
+				}
+
+				msg = formatter.FormatMessageForStackOverflow(updates)
+				slog.Info("Got %d updates", len(updates))
+			} else {
+				updater := api.GithubUpdater{}
+				updates, _ := s.saveGithubUpdates(ctx, updater, link.ID, link.URL, prevTime)
+
+				if len(updates) == 0 {
+					continue
+				}
+
+				msg = formatter.FormatMessageForGithub(updates)
+				slog.Info("Got %d updates", len(updates))
+			}
+
+			IDs := s.Storage.GetTgChatIDsForLink(ctx, link.URL)
+
+			if len(IDs) == 0 {
+				continue
+			}
+
+			updForBot := bottypes.LinkUpdate{
+				URL:         link.URL,
+				Description: msg,
+				TgChatIDs:   IDs,
+			}
+
+			err := s.BotClient.SendUpdate(updForBot)
 			if err != nil {
 				return
 			}
 		}
+		links, lastID = s.Storage.GetBatchOfLinks(ctx, batch, lastID)
 	}
 }
 
-func (s *Server) startScheduler() {
-	sc := gocron.NewScheduler(time.UTC)
-	task := s.monitorLinks
+func (s *Server) saveStackoverflowUpdates(ctx context.Context, updater api.StackoverflowUpdater, linkID int64, url string, prevTime time.Time) ([]api_types.StackOverFlowUpdate, error) {
+	updates := updater.GetUpdates(url, prevTime)
 
-	_, err := sc.Every(6).Seconds().Do(task)
+	for _, update := range updates {
+		t := time.Unix(update.CreatedAt, 0)
+
+		err := s.Storage.SaveLastUpdate(ctx, linkID, t)
+		if err != nil {
+			return []api_types.StackOverFlowUpdate{}, err
+		}
+	}
+
+	return updates, nil
+}
+
+func (s *Server) saveGithubUpdates(ctx context.Context, updater api.GithubUpdater, linkID int64, url string, prevTime time.Time) ([]api_types.GithubUpdate, error) {
+	//log.Println("In saveGithubUpdates function")
+	updates := updater.GetUpdates(url, prevTime)
+
+	for _, update := range updates {
+		t, err := time.Parse(time.RFC3339, update.CreatedAt)
+		if err != nil {
+			return []api_types.GithubUpdate{}, err
+		}
+
+		errSave := s.Storage.SaveLastUpdate(ctx, linkID, t)
+		if errSave != nil {
+			return []api_types.GithubUpdate{}, errSave
+		}
+	}
+
+	return updates, nil
+}
+
+func (s *Server) startScheduler(batch int) {
+	slog.Info("Scheduler started")
+
+	sc := gocron.NewScheduler(time.UTC)
+
+	_, err := sc.Every(10).Minutes().Do(func() {
+		go s.monitorLinks(batch)
+	})
 	if err != nil {
 		slog.Error(
 			e.ErrScheduler.Error(),
@@ -112,6 +201,7 @@ func (s *Server) ChatHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) RegisterChat(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	idStr := r.URL.Path[len("/tg-chat/"):]
 
 	id, err := strconv.ParseInt(idStr, 10, 64)
@@ -120,22 +210,29 @@ func (s *Server) RegisterChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	errCreate := s.Storage.CreateChat(id)
+	errCreate := s.Storage.CreateChat(ctx, id)
 	if errCreate != nil {
+		slog.Error("Error creating chate",
+			slog.String("error", err.Error()))
 		http.Error(w, "Chat already exists.", http.StatusBadRequest)
-	} else {
-		response := map[string]interface{}{"message": "Chat registered successfully", "id": id}
 
-		w.WriteHeader(http.StatusOK)
+		return
+	}
 
-		errEncoding := json.NewEncoder(w).Encode(response)
-		if errEncoding != nil {
-			return
-		}
+	slog.Info("Registered chat")
+
+	response := map[string]interface{}{"message": "Chat registered successfully", "id": id}
+
+	w.WriteHeader(http.StatusOK)
+
+	errEncoding := json.NewEncoder(w).Encode(response)
+	if errEncoding != nil {
+		return
 	}
 }
 
 func (s *Server) DeleteChat(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	idStr := r.URL.Path[len("/tg-chat/"):]
 
 	id, err := strconv.ParseInt(idStr, 10, 64)
@@ -144,7 +241,7 @@ func (s *Server) DeleteChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	errDelete := s.Storage.DeleteChat(id)
+	errDelete := s.Storage.DeleteChat(ctx, id)
 	if errDelete != nil {
 		http.Error(w, "Chat not found.", http.StatusNotFound)
 		return
@@ -154,6 +251,7 @@ func (s *Server) DeleteChat(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) GetLinks(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	chatIDStr := r.URL.Query().Get("Tg-Chat-Id")
 
 	id, err := strconv.ParseInt(chatIDStr, 10, 64)
@@ -162,7 +260,7 @@ func (s *Server) GetLinks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	links, errGet := s.Storage.GetLinks(id)
+	links, errGet := s.Storage.GetLinks(ctx, id)
 
 	if errGet != nil {
 		http.Error(w, "Chat not found.", http.StatusNotFound)
@@ -179,6 +277,8 @@ func (s *Server) GetLinks(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) AddLink(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
 	slog.Info("In add Link in scrapper server")
 
 	chatIDStr := r.URL.Query().Get("Tg-Chat-Id")
@@ -195,28 +295,7 @@ func (s *Server) AddLink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	content := ""
-
-	if updater, ok := api.GetUpdater(request.Link); ok {
-		content, err = updater(request.Link)
-		if err != nil {
-			slog.Error(
-				"Updater error",
-				slog.String("url", request.Link),
-			)
-
-			return
-		}
-	} else {
-		slog.Error(
-			e.ErrWrongURLFormat.Error(),
-			slog.String("url", request.Link),
-		)
-
-		return
-	}
-
-	errAppend := s.Storage.AddLink(id, request.Link, request.Tags, request.Filters, content)
+	errAppend := s.Storage.AddLink(ctx, id, request.Link, request.Tags, request.Filters)
 	if errAppend == nil {
 		return
 	}
@@ -244,10 +323,21 @@ func (s *Server) AddLink(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) RemoveLink(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
 	chatIDStr := r.URL.Query().Get("Tg-Chat-Id")
 	id, err := strconv.ParseInt(chatIDStr, 10, 64)
 
-	if err != nil || id <= 0 {
+	if err != nil {
+		slog.Error("Error parsing id string",
+			slog.String("error", err.Error()))
+		return
+	}
+
+	if id <= 0 {
+		slog.Error("Error invalid id(less than zero)",
+			slog.String("error", err.Error()))
+
 		http.Error(w, "Invalid chat ID", http.StatusBadRequest)
 		return
 	}
@@ -258,7 +348,7 @@ func (s *Server) RemoveLink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	errRemove := s.Storage.RemoveLink(id, request.Link)
+	errRemove := s.Storage.RemoveLink(ctx, id, request.Link)
 	if errRemove == nil {
 		return
 	}
