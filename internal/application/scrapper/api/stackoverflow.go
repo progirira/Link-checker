@@ -3,12 +3,30 @@ package api
 import (
 	"encoding/json"
 	"fmt"
-	"go-progira/lib/e"
+	"go-progira/pkg/e"
 	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
 )
+
+type UpdaterFunc func(url string) (string, error)
+
+var updaters = map[string]UpdaterFunc{
+	"stackoverflow": GetStackOverflowUpdates,
+	"github":        GetGitHubUpdates,
+}
+
+func GetUpdater(url string) (UpdaterFunc, bool) {
+	switch {
+	case IsStackOverflowURL(url):
+		return updaters["stackoverflow"], true
+	case IsGitHubURL(url):
+		return updaters["github"], true
+	default:
+		return nil, false
+	}
+}
 
 type questions struct {
 	Items []item `json:"items"`

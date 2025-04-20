@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	scrappertypes "go-progira/internal/domain/types/scrapper_types"
-	"go-progira/lib/e"
+	"go-progira/pkg/e"
 	"log/slog"
 	"net/http"
 	"net/url"

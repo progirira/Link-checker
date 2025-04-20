@@ -84,58 +84,96 @@ func isValidURL(str string) bool {
 	return err == nil
 }
 
+func (m Manager) processListCommand(id int) {
+	links, err := m.ScrapClient.GetLinks(int64(id))
+	if err != nil {
+		slog.Error("Error getting links",
+			slog.String("error", err.Error()))
+		return
+	}
+
+	if len(links.Links) == 0 {
+		err = m.TgClient.SendMessage(id, botmessages.MsgNoSavedPages)
+		if err != nil {
+			slog.Error("Error sending message",
+				slog.String("error", err.Error()))
+		}
+	} else {
+		linkList := MakeLinkList(links.Links)
+
+		err := m.TgClient.SendMessage(id, linkList)
+		if err != nil {
+			slog.Error("Error sending message",
+				slog.String("error", err.Error()))
+		}
+	}
+}
+
 func (m Manager) handleStart(id int, text string) {
 	parts := strings.Fields(text)
 
 	switch parts[0] {
 	case "/track":
-		if isValidURL(parts[1]) {
-			m.addRequests[id] = &scrappertypes.AddLinkRequest{Link: parts[1]}
-
-			err := m.TgClient.SendMessage(id, botmessages.MsgAddTags)
+		if len(parts) == 1 || !isValidURL(parts[1]) {
+			err := m.TgClient.SendMessage(id, botmessages.MsgUnknownCommand)
 			if err != nil {
-				return
+				slog.Error("Error sending message",
+					slog.String("error", err.Error()))
 			}
 
-			m.States[id] = stateAwaitingTagsForTrack
-		}
-	case "/untrack":
-		if isValidURL(parts[1]) {
-			delReq := scrappertypes.RemoveLinkRequest{Link: parts[1]}
-
-			_, err := m.ScrapClient.RemoveLink(int64(id), delReq)
-			if err != nil {
-				return
-			}
-
-			err = m.TgClient.SendMessage(id, botmessages.MsgAddTags)
-			if err != nil {
-				return
-			}
-		}
-	case "/list":
-		links, err := m.ScrapClient.GetLinks(int64(id))
-		if err != nil {
 			return
 		}
 
-		if len(links.Links) == 0 {
-			_ = m.TgClient.SendMessage(id, botmessages.MsgNoSavedPages)
-		} else {
-			linkList := MakeLinkList(links.Links)
+		m.addRequests[id] = &scrappertypes.AddLinkRequest{Link: parts[1]}
 
-			err := m.TgClient.SendMessage(id, linkList)
-			if err != nil {
-				return
-			}
+		err := m.TgClient.SendMessage(id, botmessages.MsgAddTags)
+		if err != nil {
+			slog.Error("Error sending message",
+				slog.String("error", err.Error()))
+
+			return
 		}
+
+		m.States[id] = stateAwaitingTagsForTrack
+
+	case "/untrack":
+		if len(parts) == 1 || !isValidURL(parts[1]) {
+			err := m.TgClient.SendMessage(id, botmessages.MsgUnknownCommand)
+			if err != nil {
+				slog.Error("Error sending message",
+					slog.String("error", err.Error()))
+			}
+
+			return
+		}
+
+		delReq := scrappertypes.RemoveLinkRequest{Link: parts[1]}
+
+		_, err := m.ScrapClient.RemoveLink(int64(id), delReq)
+		if err != nil {
+			slog.Error("Error removing link",
+				slog.String("error", err.Error()),
+				slog.String("link", parts[1]))
+
+			return
+		}
+
+		errSendMes := m.TgClient.SendMessage(id, botmessages.MsgDeleted)
+		if errSendMes != nil {
+			slog.Error("Error sending message",
+				slog.String("error", errSendMes.Error()))
+		}
+
+	case "/list":
+		m.processListCommand(id)
 	case "/help":
 		m.SendHelp(id)
 
 	default:
 		err := m.TgClient.SendMessage(id, botmessages.MsgUnknownCommand)
 		if err != nil {
-			return
+			slog.Error("Error sending message",
+				slog.String("error", err.Error()))
 		}
 	}
 }
@@ -201,14 +239,14 @@ func (m Manager) handleAwaitingFiltersForTrack(id int, text string) {
 	}
 }
 
-func (m *Manager) buildHandlers() {
+func (m Manager) buildHandlers() {
 	m.handlers[StateAwaitingStart] = m.HandleAwaitingStart
 	m.handlers[StateStart] = m.handleStart
 	m.handlers[stateAwaitingTagsForTrack] = m.handleAwaitingTagsForTrack
 	m.handlers[stateAwaitingFiltersForTrack] = m.handleAwaitingFiltersForTrack
 }
 
-func (m *Manager) getUserState(id int) State {
+func (m Manager) getUserState(id int) State {
 	if _, ok := m.States[id]; !ok {
 		m.States[id] = StateAwaitingStart
 	}

@@ -6,16 +6,15 @@ import (
 	"errors"
 	"fmt"
 	"go-progira/internal/application/scrapper"
-	"go-progira/internal/application/scrapper/storage"
 	scrappertypes "go-progira/internal/domain/types/scrapper_types"
-	"go-progira/lib/e"
+	"go-progira/internal/repository/storage"
+	"go-progira/pkg/e"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strconv"
-	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -24,8 +23,7 @@ import (
 func TestRegisterChat(t *testing.T) {
 	dict := &storage.DictionaryStorage{Chats: make(map[int64]*scrappertypes.Chat)}
 	s := &scrapper.Server{
-		Storage:   dict,
-		ChatMutex: sync.Mutex{},
+		Storage: dict,
 	}
 
 	chatID := int64(12345)
@@ -95,8 +93,7 @@ func TestRegisterChat(t *testing.T) {
 func TestIsURLInAdded(t *testing.T) {
 	dict := &storage.DictionaryStorage{Chats: make(map[int64]*scrappertypes.Chat)}
 	s := &scrapper.Server{
-		Storage:   dict,
-		ChatMutex: sync.Mutex{},
+		Storage: dict,
 	}
 
 	chatID := int64(12345)
@@ -150,8 +147,7 @@ func TestAppendLinkToLinks_HappyPath(t *testing.T) {
 
 	dict := &storage.DictionaryStorage{Chats: make(map[int64]*scrappertypes.Chat)}
 	s := &scrapper.Server{
-		Storage:   dict,
-		ChatMutex: sync.Mutex{},
+		Storage: dict,
 	}
 
 	for _, testCase := range testCases {
@@ -167,9 +163,6 @@ func TestAppendLinkToLinks_HappyPath(t *testing.T) {
 			if err != nil {
 				t.Errorf("Incorrect answer, got: %v; expected %v in case %v", err, nil, testCase.name)
 			}
-
-			s.ChatMutex.Lock()
-			defer s.ChatMutex.Unlock()
 
 			var found bool
 
@@ -215,8 +208,7 @@ func TestAppendLinkToLinks_ChatNotFound(t *testing.T) {
 
 	dict := &storage.DictionaryStorage{Chats: make(map[int64]*scrappertypes.Chat)}
 	s := &scrapper.Server{
-		Storage:   dict,
-		ChatMutex: sync.Mutex{},
+		Storage: dict,
 	}
 
 	for _, testCase := range testCases {
@@ -253,8 +245,7 @@ func TestTwiceAppendLinkToLinks(t *testing.T) {
 
 	dict := &storage.DictionaryStorage{Chats: make(map[int64]*scrappertypes.Chat)}
 	s := &scrapper.Server{
-		Storage:   dict,
-		ChatMutex: sync.Mutex{},
+		Storage: dict,
 	}
 
 	for _, testCase := range testCases {
@@ -331,7 +322,6 @@ func TestRemoveLink(t *testing.T) {
 		dict := &storage.DictionaryStorage{Chats: make(map[int64]*scrappertypes.Chat)}
 		server := &scrapper.Server{
 			Storage:   dict,
-			ChatMutex: sync.Mutex{},
 			BotClient: new(scrapper.MockBotClient),
 		}
 

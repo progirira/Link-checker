@@ -2,7 +2,7 @@ package clients_test
 
 import (
 	"go-progira/internal/application/bot/clients"
-	"go-progira/lib/e"
+	"go-progira/pkg/e"
 	"io"
 	"log/slog"
 	"net/http"

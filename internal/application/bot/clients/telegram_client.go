@@ -3,7 +3,7 @@ package clients
 import (
 	"encoding/json"
 	telegramtypes "go-progira/internal/domain/types/telegram_types"
-	"go-progira/lib/e"
+	"go-progira/pkg/e"
 	"io"
 	"log/slog"
 	"net/http"

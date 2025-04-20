@@ -5,9 +5,10 @@ import (
 	botmessages "go-progira/internal/domain/bot_messages"
 	bottypes "go-progira/internal/domain/types/bot_types"
 	scrappertypes "go-progira/internal/domain/types/scrapper_types"
-	"go-progira/lib/e"
+	"go-progira/pkg/e"
 	"log/slog"
 	"strconv"
+	"sync"
 	"time"
 )
 
@@ -22,10 +23,15 @@ type Storage interface {
 }
 
 type DictionaryStorage struct {
+	mutex sync.RWMutex
 	Chats map[int64]*scrappertypes.Chat
 }
 
 func (d *DictionaryStorage) CreateChat(id int64) error {
+	d.mutex.Lock()
+
+	defer d.mutex.Unlock()
+
 	if _, exists := d.Chats[id]; exists {
 		slog.Error(e.ErrChatAlreadyExists.Error())
 
@@ -38,6 +44,10 @@ func (d *DictionaryStorage) CreateChat(id int64) error {
 }
 
 func (d *DictionaryStorage) DeleteChat(id int64) error {
+	d.mutex.Lock()
+
+	defer d.mutex.Unlock()
+
 	if _, exists := d.Chats[id]; !exists {
 		slog.Error(e.ErrChatNotFound.Error())
 
@@ -50,6 +60,10 @@ func (d *DictionaryStorage) DeleteChat(id int64) error {
 }
 
 func (d *DictionaryStorage) GetLinks(id int64) ([]scrappertypes.LinkResponse, error) {
+	d.mutex.RLock()
+
+	defer d.mutex.RUnlock()
+
 	chat, exists := d.Chats[id]
 	if !exists {
 		slog.Error(e.ErrChatNotFound.Error())
@@ -62,7 +76,12 @@ func (d *DictionaryStorage) GetLinks(id int64) ([]scrappertypes.LinkResponse, er
 }
 
 func (d *DictionaryStorage) AddLink(id int64, url string, tags, filters []string, content string) error {
+	d.mutex.RLock()
+
 	_, exists := d.Chats[id]
+
+	d.mutex.RUnlock()
+
 	if !exists {
 		return e.ErrChatNotFound
 	}
@@ -80,7 +99,12 @@ func (d *DictionaryStorage) AddLink(id int64, url string, tags, filters []string
 }
 
 func (d *DictionaryStorage) RemoveLink(id int64, link string) error {
+	d.mutex.Lock()
+
+	defer d.mutex.Unlock()
+
 	chat, exists := d.Chats[id]
+
 	if !exists {
 		slog.Error(e.ErrChatNotFound.Error())
 		return e.ErrChatNotFound
@@ -101,13 +125,22 @@ func (d *DictionaryStorage) RemoveLink(id int64, link string) error {
 }
 
 func (d *DictionaryStorage) AppendLinkToLinks(chatID int64, link *scrappertypes.LinkResponse) error {
+	d.mutex.RLock()
+
 	chat, exists := d.Chats[chatID]
+
+	d.mutex.RUnlock()
+
 	if !exists {
 		return e.ErrChatNotFound
 	}
 
 	if !d.IsURLInAdded(chatID, link.URL) {
+		d.mutex.RLock()
+
 		chat.Links = append(chat.Links, *link)
+
+		d.mutex.RUnlock()
 	} else {
 		return e.ErrLinkAlreadyExists
 	}
@@ -116,6 +149,10 @@ func (d *DictionaryStorage) AppendLinkToLinks(chatID int64, link *scrappertypes.
 }
 
 func (d *DictionaryStorage) IsURLInAdded(id int64, u string) bool {
+	d.mutex.RLock()
+
+	defer d.mutex.RUnlock()
+
 	if len(d.Chats[id].Links) == 0 {
 		return false
 	}
@@ -130,6 +167,10 @@ func (d *DictionaryStorage) IsURLInAdded(id int64, u string) bool {
 }
 
 func (d *DictionaryStorage) GetAllIDs(id int64) ([]scrappertypes.LinkResponse, error) {
+	d.mutex.RLock()
+
+	defer d.mutex.RUnlock()
+
 	chat, exists := d.Chats[id]
 	if !exists {
 		slog.Error(e.ErrChatNotFound.Error())
@@ -148,35 +189,43 @@ func (d *DictionaryStorage) Update() []bottypes.LinkUpdate {
 
 	var err error
 
+	d.mutex.RLock()
+
 	for chatID, chat := range d.Chats {
 		for _, link := range chat.Links {
-			switch api.IsStackOverflowURL(link.URL) {
-			case true:
-				currentVersion, err = api.GetStackOverflowUpdates(link.URL)
-			case false:
-				if api.IsGitHubURL(link.URL) {
-					currentVersion, err = api.CheckGitHubUpdates(link.URL)
+			if updater, ok := api.GetUpdater(link.URL); ok {
+				currentVersion, err = updater(link.URL)
+				if err != nil {
+					slog.Error(
+						"Updater error",
+						slog.String("url", link.URL),
+					)
+
+					continue
 				}
-			default:
+			} else {
 				slog.Error(
 					e.ErrWrongURLFormat.Error(),
 					slog.String("url", link.URL),
 				)
-			}
 
-			if err != nil {
-				return updates
+				continue
 			}
 
 			if currentVersion != "" {
+				d.mutex.RUnlock()
 				update := d.updateLinkContent(chatID, link.URL, currentVersion)
 
 				if update.URL != "" {
 					updates = append(updates, update)
 				}
+
+				d.mutex.RLock()
 			}
 		}
 	}
+
+	d.mutex.RUnlock()
 
 	return updates
 }
@@ -184,6 +233,7 @@ func (d *DictionaryStorage) Update() []bottypes.LinkUpdate {
 func (d *DictionaryStorage) updateLinkContent(id int64, url, lastContent string) bottypes.LinkUpdate {
 	var update bottypes.LinkUpdate
 
+	d.mutex.Lock()
 	for i, l := range d.Chats[id].Links {
 		if url == l.URL {
 			if lastContent != "" && lastContent != l.LastVersion {
@@ -201,6 +251,8 @@ func (d *DictionaryStorage) updateLinkContent(id int64, url, lastContent string)
 			}
 		}
 	}
+
+	d.mutex.Unlock()
 
 	return bottypes.LinkUpdate{}
 }

@@ -4,6 +4,7 @@ const (
 	MsgUnknownCommand  = "Неизвестная команда. Попробуйте ввести заново!"
 	MsgNoSavedPages    = "Нет отслеживаемых ссылок"
 	MsgSaved           = "Сохранил!"
+	MsgDeleted         = "Удалил!"
 	MsgUpdatesHappened = "Произошли изменения по ссылке "
 	MsgAlreadyExists   = "В списке отслеживаемых уже есть эта ссылка "
 	MsgAddTags         = "Введите теги через пробел по необходимости"

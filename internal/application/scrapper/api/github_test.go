@@ -3,7 +3,7 @@ package api_test
 import (
 	"errors"
 	"go-progira/internal/application/scrapper/api"
-	"go-progira/lib/e"
+	"go-progira/pkg/e"
 	"testing"
 )
 

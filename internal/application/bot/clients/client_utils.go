@@ -2,7 +2,7 @@ package clients
 
 import (
 	"bytes"
-	"go-progira/lib/e"
+	"go-progira/pkg/e"
 	"io"
 	"log/slog"
 	"net/http"

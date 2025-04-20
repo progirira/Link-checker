@@ -3,7 +3,7 @@ package api
 import (
 	"encoding/json"
 	"fmt"
-	"go-progira/lib/e"
+	"go-progira/pkg/e"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -47,7 +47,7 @@ func GetOwnerAndRepo(link string) (owner, repo string, err error) {
 	return owner, repo, nil
 }
 
-func CheckGitHubUpdates(link string) (string, error) {
+func GetGitHubUpdates(link string) (string, error) {
 	owner, repo, err := GetOwnerAndRepo(link)
 	if err != nil {
 		slog.Error(err.Error(),

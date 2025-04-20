@@ -4,16 +4,15 @@ import (
 	"encoding/json"
 	"errors"
 	"go-progira/internal/application/scrapper/api"
-	"go-progira/internal/application/scrapper/storage"
 	botmessages "go-progira/internal/domain/bot_messages"
 	bottypes "go-progira/internal/domain/types/bot_types"
 	scrappertypes "go-progira/internal/domain/types/scrapper_types"
-	"go-progira/lib/e"
+	"go-progira/internal/repository/storage"
+	"go-progira/pkg/e"
 	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/go-co-op/gocron"
@@ -21,14 +20,12 @@ import (
 
 type Server struct {
 	Storage   storage.Storage
-	ChatMutex sync.Mutex
 	BotClient HTTPBotClient
 }
 
 func NewServer(storage storage.Storage, client HTTPBotClient) *Server {
 	return &Server{
 		Storage:   storage,
-		ChatMutex: sync.Mutex{},
 		BotClient: client,
 	}
 }
@@ -57,10 +54,8 @@ func (s *Server) Start() {
 }
 
 func (s *Server) monitorLinks() {
-	s.ChatMutex.Lock()
-	defer s.ChatMutex.Unlock()
-
 	updates := s.Storage.Update()
+
 	if len(updates) > 0 {
 		for _, upd := range updates {
 			err := s.BotClient.SendUpdate(upd)
@@ -125,9 +120,6 @@ func (s *Server) RegisterChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.ChatMutex.Lock()
-	defer s.ChatMutex.Unlock()
-
 	errCreate := s.Storage.CreateChat(id)
 	if errCreate != nil {
 		http.Error(w, "Chat already exists.", http.StatusBadRequest)
@@ -152,9 +144,6 @@ func (s *Server) DeleteChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.ChatMutex.Lock()
-	defer s.ChatMutex.Unlock()
-
 	errDelete := s.Storage.DeleteChat(id)
 	if errDelete != nil {
 		http.Error(w, "Chat not found.", http.StatusNotFound)
@@ -173,9 +162,6 @@ func (s *Server) GetLinks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.ChatMutex.Lock()
-	defer s.ChatMutex.Unlock()
-
 	links, errGet := s.Storage.GetLinks(id)
 
 	if errGet != nil {
@@ -193,7 +179,7 @@ func (s *Server) GetLinks(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) AddLink(w http.ResponseWriter, r *http.Request) {
-	slog.Debug("In add Link in scrapper server")
+	slog.Info("In add Link in scrapper server")
 
 	chatIDStr := r.URL.Query().Get("Tg-Chat-Id")
 	id, err := strconv.ParseInt(chatIDStr, 10, 64)
@@ -211,16 +197,23 @@ func (s *Server) AddLink(w http.ResponseWriter, r *http.Request) {
 
 	content := ""
 
-	if api.IsGitHubURL(request.Link) {
-		content, err = api.CheckGitHubUpdates(request.Link)
+	if updater, ok := api.GetUpdater(request.Link); ok {
+		content, err = updater(request.Link)
 		if err != nil {
+			slog.Error(
+				"Updater error",
+				slog.String("url", request.Link),
+			)
+
 			return
 		}
-	} else if api.IsStackOverflowURL(request.Link) {
-		content, err = api.GetStackOverflowUpdates(request.Link)
-		if err != nil {
-			return
-		}
+	} else {
+		slog.Error(
+			e.ErrWrongURLFormat.Error(),
+			slog.String("url", request.Link),
+		)
+
+		return
 	}
 
 	errAppend := s.Storage.AddLink(id, request.Link, request.Tags, request.Filters, content)
@@ -264,9 +257,6 @@ func (s *Server) RemoveLink(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid request.", http.StatusBadRequest)
 		return
 	}
-
-	s.ChatMutex.Lock()
-	defer s.ChatMutex.Unlock()
 
 	errRemove := s.Storage.RemoveLink(id, request.Link)
 	if errRemove == nil {

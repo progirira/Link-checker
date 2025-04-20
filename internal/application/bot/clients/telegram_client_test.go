@@ -3,7 +3,7 @@ package clients_test
 import (
 	"errors"
 	"go-progira/internal/application/bot/clients"
-	"go-progira/lib/e"
+	"go-progira/pkg/e"
 	"net/http"
 	"net/http/httptest"
 	"testing"
