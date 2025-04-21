@@ -2,10 +2,11 @@ package repository
 
 import (
 	"context"
-	"github.com/jackc/pgx/v4/pgxpool"
-	scrappertypes "go-progira/internal/domain/types/scrapper_types"
+	"go-progira/internal/domain/types/scrappertypes"
 	"log/slog"
 	"time"
+
+	"github.com/jackc/pgx/v4/pgxpool"
 )
 
 type SQLStorage struct {
@@ -14,6 +15,7 @@ type SQLStorage struct {
 
 func NewSQLStorage(dbURL string) (*SQLStorage, error) {
 	var pool *pgxpool.Pool
+
 	var err error
 
 	pool, err = pgxpool.Connect(context.Background(), dbURL)
@@ -21,6 +23,7 @@ func NewSQLStorage(dbURL string) (*SQLStorage, error) {
 		slog.Error(ErrPoolCreate.Error(),
 			slog.String("error", err.Error()),
 			slog.String("database URL", dbURL))
+
 		return nil, err
 	}
 
@@ -55,7 +58,9 @@ func (s *SQLStorage) AddLink(ctx context.Context, id int64, url string, tags, fi
 
 	var linkID int64
 
-	errQuery := tx.QueryRow(ctx, "INSERT INTO links (url, changed_at) VALUES ($1, NOW()) ON CONFLICT (url) DO NOTHING RETURNING id", url).Scan(&linkID)
+	errQuery := tx.QueryRow(ctx,
+		"INSERT INTO links (url, changed_at) VALUES ($1, NOW()) ON CONFLICT (url) DO NOTHING RETURNING id",
+		url).Scan(&linkID)
 
 	if errQuery != nil {
 		slog.Error("Query Exec error")
@@ -79,7 +84,9 @@ func (s *SQLStorage) AddLink(ctx context.Context, id int64, url string, tags, fi
 		}
 	}
 
-	_, err = tx.Exec(ctx, "INSERT INTO link_users (user_id, link_id) VALUES ((SELECT id FROM users WHERE telegram_id = $1), $2) ON CONFLICT DO NOTHING", id, linkID)
+	_, err = tx.Exec(ctx,
+		"INSERT INTO link_users (user_id, link_id) VALUES ((SELECT id FROM users WHERE telegram_id = $1), $2) ON CONFLICT DO NOTHING",
+		id, linkID)
 	if err != nil {
 		slog.Error(ErrExecQuery.Error(),
 			slog.String("error", err.Error()))
@@ -122,9 +129,9 @@ func (s *SQLStorage) RemoveLink(ctx context.Context, id int64, link string) erro
         WHERE user_id = (SELECT id FROM users WHERE telegram_id = $1) 
         AND link_id = (SELECT id FROM links WHERE url = $2)`, id, link)
 	if err != nil {
-		slog.Error(ErrRemoveLink.Error())
-		slog.String("error", err.Error())
-		slog.Int("id", int(id))
+		slog.Error(ErrRemoveLink.Error(),
+			slog.String("error", err.Error()),
+			slog.Int("id", int(id)))
 	}
 
 	return err
@@ -148,6 +155,7 @@ func (s *SQLStorage) GetTags(ctx context.Context, id int64) map[int64][]string {
 
 	for rows.Next() {
 		var linkID int64
+
 		var tag string
 
 		err := rows.Scan(&linkID, &tag)
@@ -183,6 +191,7 @@ func (s *SQLStorage) GetFilters(ctx context.Context, id int64) map[int64][]strin
 
 	for rows.Next() {
 		var linkID int64
+
 		var filter string
 
 		err := rows.Scan(&linkID, &filter)
@@ -202,7 +211,7 @@ func (s *SQLStorage) GetFilters(ctx context.Context, id int64) map[int64][]strin
 
 func (s *SQLStorage) GetLinks(ctx context.Context, id int64) ([]scrappertypes.LinkResponse, error) {
 	rows, err := s.db.Query(ctx, `
-        SELECT l.id, l.url, l.changed_at 
+        SELECT l.id, l.url, l.changed_at
         FROM links l
         JOIN link_users lu ON l.id = lu.link_id
         JOIN users u ON u.id = lu.user_id
@@ -257,9 +266,8 @@ func (s *SQLStorage) IsURLInAdded(ctx context.Context, id int64, u string) bool 
 	return exists
 }
 
-func (s *SQLStorage) GetBatchOfLinks(ctx context.Context, batch int, lastID int64) ([]scrappertypes.LinkResponse, int64) {
-	var links []scrappertypes.LinkResponse
-
+func (s *SQLStorage) GetBatchOfLinks(ctx context.Context, batch int, lastID int64) (links []scrappertypes.LinkResponse,
+	lastReturnedID int64) {
 	rows, err := s.db.Query(ctx, `
 			SELECT id, url FROM links
 			WHERE id > $1
@@ -269,7 +277,7 @@ func (s *SQLStorage) GetBatchOfLinks(ctx context.Context, batch int, lastID int6
 		return []scrappertypes.LinkResponse{}, lastID
 	}
 
-	lastReturnedID := lastID
+	lastReturnedID = lastID
 
 	for rows.Next() {
 		var link scrappertypes.LinkResponse
@@ -286,26 +294,25 @@ func (s *SQLStorage) GetBatchOfLinks(ctx context.Context, batch int, lastID int6
 	return links, lastReturnedID
 }
 
-func (s *SQLStorage) GetPreviousUpdate(ctx context.Context, ID int64) time.Time {
+func (s *SQLStorage) GetPreviousUpdate(ctx context.Context, id int64) time.Time {
 	var updTime time.Time
 
 	err := s.db.QueryRow(ctx, `
 		SELECT changed_at FROM links
-		WHERE id = $1`, ID).Scan(&updTime)
+		WHERE id = $1`, id).Scan(&updTime)
 	if err != nil {
 		return time.Time{}
 	}
-	//TODO: отличать отсутствие строк от ошибки
 
 	return updTime
 }
 
-func (s *SQLStorage) SaveLastUpdate(ctx context.Context, ID int64, updTime time.Time) error {
+func (s *SQLStorage) SaveLastUpdate(ctx context.Context, id int64, updTime time.Time) error {
 	_, err := s.db.Exec(ctx, `
         UPDATE links
         SET changed_at = $1
         WHERE id = $2
-        `, updTime, ID)
+        `, updTime, id)
 
 	return err
 }

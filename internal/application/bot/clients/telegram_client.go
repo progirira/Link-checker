@@ -2,7 +2,7 @@ package clients
 
 import (
 	"encoding/json"
-	telegramtypes "go-progira/internal/domain/types/telegram_types"
+	"go-progira/internal/domain/types/telegramtypes"
 	"go-progira/pkg/e"
 	"io"
 	"log/slog"
@@ -117,6 +117,7 @@ func (c *TelegramClient) SendMessage(chatID int, text string) error {
 
 		return errDoReq
 	}
+
 	slog.Info("Sent message to tg",
 		slog.Int("chat_id", chatID))
 

@@ -4,9 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"go-progira/internal/application/bot/clients"
-	botmessages "go-progira/internal/domain/bot_messages"
-	scrappertypes "go-progira/internal/domain/types/scrapper_types"
-	telegramtypes "go-progira/internal/domain/types/telegram_types"
+	"go-progira/internal/domain/botmessages"
+	"go-progira/internal/domain/types/scrappertypes"
+	"go-progira/internal/domain/types/telegramtypes"
 	"log/slog"
 	"net/url"
 	"strings"
@@ -52,8 +52,9 @@ func (m Manager) HandleAwaitingStart(id int, text string) {
 
 		err := m.TgClient.SendMessage(id, botmessages.MsgHello)
 		if err != nil {
-			slog.Error("Error send mes to tg")
-			slog.String("error", err.Error())
+			slog.Error(("Error send mes to tg"),
+				slog.String("error", err.Error()))
+
 			return
 		}
 

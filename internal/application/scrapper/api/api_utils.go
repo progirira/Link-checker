@@ -21,7 +21,7 @@ func doRequest(request *http.Request) (body []byte, err error) {
 		return nil, e.ErrDoRequest
 	}
 
-	if response.StatusCode != 200 {
+	if response.StatusCode != http.StatusOK {
 		slog.Error(
 			e.ErrAPI.Error(),
 			slog.String("function", "Github updates"),

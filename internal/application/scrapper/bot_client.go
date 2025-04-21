@@ -3,7 +3,7 @@ package scrapper
 import (
 	"bytes"
 	"encoding/json"
-	bottypes "go-progira/internal/domain/types/bot_types"
+	"go-progira/internal/domain/types/bottypes"
 	"go-progira/pkg/e"
 	"io"
 	"log/slog"

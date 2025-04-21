@@ -1,8 +1,8 @@
 package clients
 
 import (
-	scrappertypes "go-progira/internal/domain/types/scrapper_types"
-	telegramtypes "go-progira/internal/domain/types/telegram_types"
+	"go-progira/internal/domain/types/scrappertypes"
+	"go-progira/internal/domain/types/telegramtypes"
 
 	"github.com/stretchr/testify/mock"
 )

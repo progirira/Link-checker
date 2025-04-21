@@ -1,7 +1,7 @@
 package scrapper
 
 import (
-	bottypes "go-progira/internal/domain/types/bot_types"
+	"go-progira/internal/domain/types/bottypes"
 
 	"github.com/stretchr/testify/mock"
 )

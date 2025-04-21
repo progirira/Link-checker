@@ -3,7 +3,7 @@ package clients
 import (
 	"encoding/json"
 	"fmt"
-	scrappertypes "go-progira/internal/domain/types/scrapper_types"
+	"go-progira/internal/domain/types/scrappertypes"
 	"go-progira/pkg/e"
 	"log/slog"
 	"net/http"

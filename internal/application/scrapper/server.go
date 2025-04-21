@@ -5,12 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"go-progira/internal/application/scrapper/api"
-	botmessages "go-progira/internal/domain/bot_messages"
-	"go-progira/internal/domain/types/api_types"
-	bottypes "go-progira/internal/domain/types/bot_types"
-	scrappertypes "go-progira/internal/domain/types/scrapper_types"
-	"go-progira/internal/formatter"
-	"go-progira/internal/repository/dictionary_storage"
+	"go-progira/internal/domain/botmessages"
+	"go-progira/internal/domain/types/bottypes"
+	"go-progira/internal/domain/types/scrappertypes"
+	repository "go-progira/internal/repository/dictionary_storage"
 	"go-progira/pkg/config"
 	"go-progira/pkg/e"
 	"log/slog"
@@ -39,10 +37,10 @@ func (s *Server) Start(batch int) {
 	http.HandleFunc("/links", s.LinksHandler)
 	s.startScheduler(batch)
 
-	slog.Debug("Starting server on :8090...")
+	slog.Debug("Starting server on :8080...")
 
 	srv := &http.Server{
-		Addr:         ":8090",
+		Addr:         ":8080",
 		Handler:      nil,
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
@@ -62,39 +60,41 @@ func (s *Server) monitorLinks(batch int) {
 
 	links, lastID := s.Storage.GetBatchOfLinks(ctx, batch, int64(0))
 
+	envData, errLoadEnv := config.Set(".env")
+	if errLoadEnv != nil {
+		return
+	}
+
+	apiKey, _ := envData.GetByKeyFromEnv("STACKOVERFLOW_API_KEY")
+
+	api.InitUpdaters(apiKey)
+
 	for len(links) != 0 {
 		for _, link := range links {
 			prevTime := s.Storage.GetPreviousUpdate(ctx, link.ID)
 
+			var lastUpdateTime time.Time
+
 			var msg string
 
-			if api.IsStackOverflowURL(link.URL) {
-				envData, errLoadEnv := config.Set(".env")
-				if errLoadEnv != nil {
-					return
-				}
-
-				apiKey, _ := envData.GetByKeyFromEnv("STACKOVERFLOW_API_KEY")
-				updater := api.StackoverflowUpdater{Key: apiKey}
-
-				updates, _ := s.saveStackoverflowUpdates(ctx, updater, link.ID, link.URL, prevTime)
-
-				if len(updates) == 0 {
+			if updater, ok := api.GetUpdater(link.URL); ok {
+				msg, lastUpdateTime = updater.GetUpdates(link.URL, prevTime)
+				if msg == "" {
 					continue
 				}
-
-				msg = formatter.FormatMessageForStackOverflow(updates)
-				slog.Info("Got %d updates", len(updates))
 			} else {
-				updater := api.GithubUpdater{}
-				updates, _ := s.saveGithubUpdates(ctx, updater, link.ID, link.URL, prevTime)
+				slog.Error(
+					e.ErrWrongURLFormat.Error(),
+					slog.String("url", link.URL),
+				)
 
-				if len(updates) == 0 {
-					continue
-				}
+				return
+			}
 
-				msg = formatter.FormatMessageForGithub(updates)
-				slog.Info("Got %d updates", len(updates))
+			errSave := s.saveLastUpdate(ctx, link.ID, lastUpdateTime)
+			if errSave != nil {
+				slog.Error("Error saving update")
+				continue
 			}
 
 			IDs := s.Storage.GetTgChatIDsForLink(ctx, link.URL)
@@ -109,47 +109,25 @@ func (s *Server) monitorLinks(batch int) {
 				TgChatIDs:   IDs,
 			}
 
-			err := s.BotClient.SendUpdate(updForBot)
-			if err != nil {
+			errSend := s.BotClient.SendUpdate(updForBot)
+			if errSend != nil {
 				return
 			}
 		}
+
 		links, lastID = s.Storage.GetBatchOfLinks(ctx, batch, lastID)
 	}
 }
 
-func (s *Server) saveStackoverflowUpdates(ctx context.Context, updater api.StackoverflowUpdater, linkID int64, url string, prevTime time.Time) ([]api_types.StackOverFlowUpdate, error) {
-	updates := updater.GetUpdates(url, prevTime)
-
-	for _, update := range updates {
-		t := time.Unix(update.CreatedAt, 0)
-
-		err := s.Storage.SaveLastUpdate(ctx, linkID, t)
-		if err != nil {
-			return []api_types.StackOverFlowUpdate{}, err
-		}
+func (s *Server) saveLastUpdate(ctx context.Context, linkID int64, lastUpdateTime time.Time) error {
+	err := s.Storage.SaveLastUpdate(ctx, linkID, lastUpdateTime)
+	if err != nil {
+		slog.Error("Failed to save last update time",
+			slog.Int("link id", int(linkID)))
+		return err
 	}
 
-	return updates, nil
-}
-
-func (s *Server) saveGithubUpdates(ctx context.Context, updater api.GithubUpdater, linkID int64, url string, prevTime time.Time) ([]api_types.GithubUpdate, error) {
-	//log.Println("In saveGithubUpdates function")
-	updates := updater.GetUpdates(url, prevTime)
-
-	for _, update := range updates {
-		t, err := time.Parse(time.RFC3339, update.CreatedAt)
-		if err != nil {
-			return []api_types.GithubUpdate{}, err
-		}
-
-		errSave := s.Storage.SaveLastUpdate(ctx, linkID, t)
-		if errSave != nil {
-			return []api_types.GithubUpdate{}, errSave
-		}
-	}
-
-	return updates, nil
+	return nil
 }
 
 func (s *Server) startScheduler(batch int) {
@@ -213,7 +191,7 @@ func (s *Server) RegisterChat(w http.ResponseWriter, r *http.Request) {
 	errCreate := s.Storage.CreateChat(ctx, id)
 	if errCreate != nil {
 		slog.Error("Error creating chate",
-			slog.String("error", err.Error()))
+			slog.String("error", errCreate.Error()))
 		http.Error(w, "Chat already exists.", http.StatusBadRequest)
 
 		return
@@ -336,15 +314,17 @@ func (s *Server) RemoveLink(w http.ResponseWriter, r *http.Request) {
 
 	if id <= 0 {
 		slog.Error("Error invalid id(less than zero)",
-			slog.String("error", err.Error()))
+			slog.Int("id", int(id)))
 
 		http.Error(w, "Invalid chat ID", http.StatusBadRequest)
+
 		return
 	}
 
 	var request scrappertypes.RemoveLinkRequest
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 		http.Error(w, "Invalid request.", http.StatusBadRequest)
+
 		return
 	}
 

@@ -2,7 +2,7 @@ package repository
 
 import (
 	"context"
-	scrappertypes "go-progira/internal/domain/types/scrapper_types"
+	"go-progira/internal/domain/types/scrappertypes"
 	"go-progira/pkg/e"
 	"log/slog"
 	"strconv"
@@ -40,7 +40,7 @@ type DictionaryStorage struct {
 	Chats map[int64]*scrappertypes.Chat
 }
 
-func (d *DictionaryStorage) CreateChat(ctx context.Context, id int64) error {
+func (d *DictionaryStorage) CreateChat(_ context.Context, id int64) error {
 	d.mutex.Lock()
 
 	defer d.mutex.Unlock()
@@ -56,7 +56,7 @@ func (d *DictionaryStorage) CreateChat(ctx context.Context, id int64) error {
 	return nil
 }
 
-func (d *DictionaryStorage) DeleteChat(ctx context.Context, id int64) error {
+func (d *DictionaryStorage) DeleteChat(_ context.Context, id int64) error {
 	d.mutex.Lock()
 
 	defer d.mutex.Unlock()
@@ -72,7 +72,7 @@ func (d *DictionaryStorage) DeleteChat(ctx context.Context, id int64) error {
 	return nil
 }
 
-func (d *DictionaryStorage) GetLinks(ctx context.Context, id int64) ([]scrappertypes.LinkResponse, error) {
+func (d *DictionaryStorage) GetLinks(_ context.Context, id int64) ([]scrappertypes.LinkResponse, error) {
 	d.mutex.RLock()
 
 	defer d.mutex.RUnlock()
@@ -111,7 +111,7 @@ func (d *DictionaryStorage) AddLink(ctx context.Context, id int64, url string, t
 	return d.AppendLinkToLinks(ctx, id, link)
 }
 
-func (d *DictionaryStorage) RemoveLink(ctx context.Context, id int64, link string) error {
+func (d *DictionaryStorage) RemoveLink(_ context.Context, id int64, link string) error {
 	d.mutex.Lock()
 
 	defer d.mutex.Unlock()
@@ -161,7 +161,7 @@ func (d *DictionaryStorage) AppendLinkToLinks(ctx context.Context, chatID int64,
 	return nil
 }
 
-func (d *DictionaryStorage) IsURLInAdded(ctx context.Context, id int64, u string) bool {
+func (d *DictionaryStorage) IsURLInAdded(_ context.Context, id int64, u string) bool {
 	d.mutex.RLock()
 
 	defer d.mutex.RUnlock()
@@ -179,7 +179,7 @@ func (d *DictionaryStorage) IsURLInAdded(ctx context.Context, id int64, u string
 	return false
 }
 
-func (d *DictionaryStorage) GetAllIDs(ctx context.Context, id int64) ([]scrappertypes.LinkResponse, error) {
+func (d *DictionaryStorage) GetAllIDs(_ context.Context, id int64) ([]scrappertypes.LinkResponse, error) {
 	d.mutex.RLock()
 
 	defer d.mutex.RUnlock()
@@ -195,10 +195,9 @@ func (d *DictionaryStorage) GetAllIDs(ctx context.Context, id int64) ([]scrapper
 	return chat.Links, nil
 }
 
-func (d *DictionaryStorage) GetBatchOfLinks(ctx context.Context, batch int, lastID int64) ([]scrappertypes.LinkResponse, int64) {
-	links := make([]scrappertypes.LinkResponse, batch)
-
-	newLastID := lastID
+func (d *DictionaryStorage) GetBatchOfLinks(_ context.Context, batch int, lastID int64) (links []scrappertypes.LinkResponse,
+	newLastID int64) {
+	newLastID = lastID
 
 	d.mutex.Lock()
 
@@ -220,8 +219,8 @@ func (d *DictionaryStorage) GetBatchOfLinks(ctx context.Context, batch int, last
 	return links, newLastID
 }
 
-//func (d *DictionaryStorage) GetPreviousUpdate(ctx context.Context, ID int64) time.Time {}
+// func (d *DictionaryStorage) GetPreviousUpdate(ctx context.Context, ID int64) time.Time {}
 //
-//func (d *DictionaryStorage) SaveLastUpdate(ctx context.Context, ID int64, updTime time.Time) error
+// func (d *DictionaryStorage) SaveLastUpdate(ctx context.Context, ID int64, updTime time.Time) error
 //
-//func (d *DictionaryStorage) GetTgChatIDsForLink(ctx context.Context, link string) []int64
+// func (d *DictionaryStorage) GetTgChatIDsForLink(ctx context.Context, link string) []int64

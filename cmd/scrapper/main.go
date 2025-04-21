@@ -3,12 +3,12 @@ package main
 import (
 	"database/sql"
 	"errors"
-	"fmt"
 	"go-progira/internal/application/scrapper"
-	sqldatabase "go-progira/internal/repository/sql_database"
+	repository "go-progira/internal/repository/sql_database"
 	"go-progira/pkg"
 	"go-progira/pkg/config"
-	"log"
+	"go-progira/pkg/e"
+	"log/slog"
 	"os"
 	"os/signal"
 	"strconv"
@@ -24,26 +24,47 @@ func main() {
 	}
 
 	connString, err := envData.GetByKeyFromEnv("DATABASE_URL")
+	if errors.Is(err, e.ErrNoValInEnv) {
+		slog.Error(err.Error())
 
-	storage, err := sqldatabase.NewSQLStorage(connString)
-	if errors.Is(err, sqldatabase.ErrPoolCreate) {
-		fmt.Println(err)
+		return
+	}
+
+	storage, err := repository.NewSQLStorage(connString)
+	if errors.Is(err, repository.ErrPoolCreate) {
+		slog.Error(err.Error())
 
 		return
 	}
 
 	conn, err := sql.Open("postgres", connString)
-	defer conn.Close()
-	migrator := sqldatabase.MustGetNewMigrator()
-	err = migrator.ApplyMigrations(conn)
 	if err != nil {
-		log.Printf("Migrations error %e", err)
-		panic(err)
-	} else {
-		log.Printf("Migrations applied!!")
+		slog.Error("Error opening connection",
+			slog.String("err", err.Error()))
+
+		return
 	}
 
-	//st := &dictionary_storage.DictionaryStorage{Chats: make(map[int64]*scrappertypes.Chat)}
+	defer func(conn *sql.DB) {
+		err := conn.Close()
+		if err != nil {
+			slog.Error("Error closing file",
+				slog.String("err", err.Error()))
+		}
+	}(conn)
+
+	migrator := repository.MustGetNewMigrator()
+
+	err = migrator.ApplyMigrations(conn)
+	if err != nil {
+		slog.Error("Migrations error %v", err.Error(),
+			slog.String("err", err.Error()))
+
+		return
+	}
+
+	slog.Info("Migrations applied!!")
+
 	botClient := scrapper.NewBotClient("http", "bot:8090", "/updates")
 	scr := scrapper.NewServer(storage, botClient)
 
@@ -51,13 +72,16 @@ func main() {
 	if errLoad != nil {
 		return
 	}
+
 	batch, _ := strconv.Atoi(batchStr)
+
+	slog.Info("Going to start scrapper server",
+		slog.Int("Batch", batch))
 	scr.Start(batch)
-	log.Println("Batch", batch)
 
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 	<-c
 
-	log.Println("Shutting down...")
+	slog.Info("Shutting down...")
 }

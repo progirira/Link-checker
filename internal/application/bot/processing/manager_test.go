@@ -3,9 +3,9 @@ package processing_test
 import (
 	"go-progira/internal/application/bot/clients"
 	"go-progira/internal/application/bot/processing"
-	botmessages "go-progira/internal/domain/bot_messages"
-	scrappertypes "go-progira/internal/domain/types/scrapper_types"
-	telegramtypes "go-progira/internal/domain/types/telegram_types"
+	"go-progira/internal/domain/botmessages"
+	"go-progira/internal/domain/types/scrappertypes"
+	"go-progira/internal/domain/types/telegramtypes"
 	"testing"
 
 	"github.com/stretchr/testify/assert"

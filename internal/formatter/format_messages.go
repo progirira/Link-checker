@@ -2,18 +2,20 @@ package formatter
 
 import (
 	"fmt"
-	"go-progira/internal/domain/types/api_types"
+	"go-progira/internal/domain/types/apitypes"
 	"strings"
 	"time"
 )
 
-func FormatMessageForStackOverflow(updates []api_types.StackOverFlowUpdate) string {
+func FormatMessageForStackOverflow(updates []apitypes.StackOverFlowUpdate) string {
 	content := strings.Builder{}
+
 	for _, update := range updates {
 		preview := update.Preview
 		if len(preview) > 200 {
 			preview = preview[:200] + "..."
 		}
+
 		typeText := update.Type.String()
 		t := time.Unix(update.CreatedAt, 0)
 
@@ -29,19 +31,22 @@ func FormatMessageForStackOverflow(updates []api_types.StackOverFlowUpdate) stri
 			t,
 			preview,
 		)
+
 		content.WriteString(text)
 	}
 
 	return content.String()
 }
 
-func FormatMessageForGithub(updates []api_types.GithubUpdate) string {
+func FormatMessageForGithub(updates []apitypes.GithubUpdate) string {
 	content := strings.Builder{}
+
 	for _, update := range updates {
 		preview := update.Preview
 		if len(preview) > 200 {
 			preview = preview[:200] + "..."
 		}
+
 		typeText := update.Type.String()
 		text := fmt.Sprintf(
 			"Новый %s на Github\n\n"+
@@ -55,6 +60,7 @@ func FormatMessageForGithub(updates []api_types.GithubUpdate) string {
 			update.CreatedAt,
 			preview,
 		)
+
 		content.WriteString(text)
 	}
 

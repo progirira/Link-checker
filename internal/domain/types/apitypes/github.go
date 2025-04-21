@@ -1,4 +1,4 @@
-package api_types
+package apitypes
 
 type GithubType int
 

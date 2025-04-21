@@ -3,7 +3,7 @@ package processing
 import (
 	"encoding/json"
 	"go-progira/internal/application/bot/clients"
-	bottypes "go-progira/internal/domain/types/bot_types"
+	"go-progira/internal/domain/types/bottypes"
 	"go-progira/pkg/e"
 	"log/slog"
 	"net/http"
