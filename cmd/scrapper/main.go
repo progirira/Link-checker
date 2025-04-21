@@ -15,6 +15,38 @@ import (
 	"syscall"
 )
 
+func migrate(migrationsPath, connString string) error {
+	conn, err := sql.Open("postgres", connString)
+	if err != nil {
+		slog.Error("Failed to connect to database",
+			slog.String("error", err.Error()))
+		return err
+	}
+
+	defer func() {
+		errClose := conn.Close()
+		if errClose != nil {
+			slog.Error("Failed to close database",
+				slog.String("error", errClose.Error()))
+
+			if err != nil {
+				err = errors.Join(errClose, err)
+			} else {
+				err = errClose
+			}
+		}
+	}()
+
+	migrator := repository.Migrator{MigrationsPath: migrationsPath}
+
+	err = migrator.ApplyMigrations(conn)
+	if err != nil {
+		return err
+	}
+
+	return err
+}
+
 func main() {
 	pkg.SetNewStdoutLogger()
 
@@ -37,33 +69,17 @@ func main() {
 		return
 	}
 
-	conn, err := sql.Open("postgres", connString)
-	if err != nil {
-		slog.Error("Error opening connection",
-			slog.String("err", err.Error()))
+	migrationsPath, err := envData.GetByKeyFromEnv("MIGRATIONS_PATH")
+	if errors.Is(err, e.ErrNoValInEnv) {
+		slog.Error(err.Error())
 
 		return
 	}
 
-	defer func(conn *sql.DB) {
-		err := conn.Close()
-		if err != nil {
-			slog.Error("Error closing file",
-				slog.String("err", err.Error()))
-		}
-	}(conn)
-
-	migrator := repository.MustGetNewMigrator()
-
-	err = migrator.ApplyMigrations(conn)
+	err = migrate(migrationsPath, connString)
 	if err != nil {
-		slog.Error("Migrations error %v", err.Error(),
-			slog.String("err", err.Error()))
-
 		return
 	}
-
-	slog.Info("Migrations applied!!")
 
 	botClient := scrapper.NewBotClient("http", "bot:8090", "/updates")
 	scr := scrapper.NewServer(storage, botClient)

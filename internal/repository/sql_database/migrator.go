@@ -2,69 +2,59 @@ package repository
 
 import (
 	"database/sql"
-	"log"
+	"errors"
 	"log/slog"
+	"os"
+
+	_ "github.com/golang-migrate/migrate/v4/source/file"
 
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/golang-migrate/migrate/v4/database/postgres"
-	"github.com/golang-migrate/migrate/v4/source"
-	"github.com/golang-migrate/migrate/v4/source/iofs"
-
-	"embed"
-	"errors"
 )
 
-const migrationsDir = "migrations"
-
-//go:embed migrations/*.sql
-var sqlFiles embed.FS
-
 type Migrator struct {
-	srcDriver source.Driver
-}
-
-func MustGetNewMigrator() *Migrator {
-	d, err := iofs.New(sqlFiles, migrationsDir)
-	if err != nil {
-		panic(err)
-	}
-
-	return &Migrator{
-		srcDriver: d,
-	}
+	MigrationsPath string
 }
 
 func (m *Migrator) ApplyMigrations(db *sql.DB) error {
+	if _, err := os.Stat(m.MigrationsPath); os.IsNotExist(err) {
+		slog.Error("Migrations directory doesn't exist",
+			slog.String("error", err.Error()))
+
+		return err
+	}
+
 	driver, err := postgres.WithInstance(db, &postgres.Config{})
 	if err != nil {
-		log.Printf("unable to create db instance: %v", err)
+		slog.Error("Failed to create db driver",
+			slog.String("error", err.Error()))
+
 		return err
 	}
 
-	migrator, err := migrate.NewWithInstance("migration_embedded_sql_files", m.srcDriver,
-		"pg_db", driver)
+	migrator, err := migrate.NewWithDatabaseInstance(
+		"file://"+m.MigrationsPath,
+		"postgres",
+		driver,
+	)
 	if err != nil {
-		log.Printf("unable to create migration: %v", err)
-		return err
+		slog.Error("failed to create migrator",
+			slog.String("error", err.Error()))
 	}
 
-	errCloseSource, errCloseDB := migrator.Close()
-	if errCloseSource != nil {
-		slog.Error("Error closing source")
+	defer func() {
+		if _, errClose := migrator.Close(); errClose != nil {
+			slog.Error("migration close error",
+				slog.String("error", errClose.Error()))
 
-		return errCloseSource
+			err = errClose
+		}
+	}()
+
+	if err := migrator.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
+		slog.Error("migration failed",
+			slog.String("error", err.Error()))
 	}
 
-	if errCloseDB != nil {
-		slog.Error("Error closing database")
-
-		return errCloseDB
-	}
-
-	if err = migrator.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
-		log.Printf("unable to apply migrations %v", err)
-		return err
-	}
-
-	return nil
+	return err
 }
