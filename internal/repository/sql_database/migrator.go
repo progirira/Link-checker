@@ -6,6 +6,9 @@ import (
 	"log/slog"
 	"os"
 
+	"github.com/golang-migrate/migrate/v4/database"
+
+	// Import file source driver for golang-migrate.
 	_ "github.com/golang-migrate/migrate/v4/source/file"
 
 	"github.com/golang-migrate/migrate/v4"
@@ -14,6 +17,7 @@ import (
 
 type Migrator struct {
 	MigrationsPath string
+	driver         database.Driver
 }
 
 func (m *Migrator) ApplyMigrations(db *sql.DB) error {
@@ -24,7 +28,9 @@ func (m *Migrator) ApplyMigrations(db *sql.DB) error {
 		return err
 	}
 
-	driver, err := postgres.WithInstance(db, &postgres.Config{})
+	var err error
+
+	m.driver, err = postgres.WithInstance(db, &postgres.Config{})
 	if err != nil {
 		slog.Error("Failed to create db driver",
 			slog.String("error", err.Error()))
@@ -35,7 +41,7 @@ func (m *Migrator) ApplyMigrations(db *sql.DB) error {
 	migrator, err := migrate.NewWithDatabaseInstance(
 		"file://"+m.MigrationsPath,
 		"postgres",
-		driver,
+		m.driver,
 	)
 	if err != nil {
 		slog.Error("failed to create migrator",

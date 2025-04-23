@@ -29,7 +29,7 @@ type UpdateStorage interface {
 	GetTgChatIDsForLink(ctx context.Context, link string) []int64
 }
 
-type Storage interface {
+type LinkService interface {
 	ChatStorage
 	LinkStorage
 	UpdateStorage

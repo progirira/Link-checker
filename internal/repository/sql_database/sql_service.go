@@ -2,18 +2,16 @@ package repository
 
 import (
 	"context"
+	"fmt"
 	"go-progira/internal/domain/types/scrappertypes"
+	repository "go-progira/internal/repository/dictionary_storage"
 	"log/slog"
 	"time"
 
 	"github.com/jackc/pgx/v4/pgxpool"
 )
 
-type SQLStorage struct {
-	db *pgxpool.Pool
-}
-
-func NewSQLStorage(dbURL string) (*SQLStorage, error) {
+func NewLinkService(typeOfService, dbURL string) (repository.LinkService, error) {
 	var pool *pgxpool.Pool
 
 	var err error
@@ -27,10 +25,21 @@ func NewSQLStorage(dbURL string) (*SQLStorage, error) {
 		return nil, err
 	}
 
-	return &SQLStorage{db: pool}, nil
+	switch typeOfService {
+	case "orm":
+		return &ORMLinkService{db: pool}, nil
+	case "sql":
+		return &SQLLinkService{db: pool}, nil
+	default:
+		return nil, fmt.Errorf("no such sql storage type: %s", typeOfService)
+	}
 }
 
-func (s *SQLStorage) CreateChat(ctx context.Context, id int64) error {
+type SQLLinkService struct {
+	db *pgxpool.Pool
+}
+
+func (s *SQLLinkService) CreateChat(ctx context.Context, id int64) error {
 	_, err := s.db.Exec(ctx, "INSERT INTO users (telegram_id) VALUES ($1) ON CONFLICT (telegram_id) DO NOTHING", id)
 	if err != nil {
 		slog.Error(ErrCreateChat.Error(),
@@ -40,7 +49,7 @@ func (s *SQLStorage) CreateChat(ctx context.Context, id int64) error {
 	return err
 }
 
-func (s *SQLStorage) DeleteChat(ctx context.Context, id int64) error {
+func (s *SQLLinkService) DeleteChat(ctx context.Context, id int64) error {
 	_, err := s.db.Exec(ctx, "DELETE FROM users WHERE telegram_id = $1", id)
 	if err != nil {
 		slog.Error(ErrDeleteChat.Error(),
@@ -50,7 +59,7 @@ func (s *SQLStorage) DeleteChat(ctx context.Context, id int64) error {
 	return err
 }
 
-func (s *SQLStorage) AddLink(ctx context.Context, id int64, url string, tags, filters []string) error {
+func (s *SQLLinkService) AddLink(ctx context.Context, id int64, url string, tags, filters []string) error {
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return err
@@ -123,7 +132,7 @@ func (s *SQLStorage) AddLink(ctx context.Context, id int64, url string, tags, fi
 	return tx.Commit(ctx)
 }
 
-func (s *SQLStorage) RemoveLink(ctx context.Context, id int64, link string) error {
+func (s *SQLLinkService) RemoveLink(ctx context.Context, id int64, link string) error {
 	_, err := s.db.Exec(ctx, `
         DELETE FROM link_users 
         WHERE user_id = (SELECT id FROM users WHERE telegram_id = $1) 
@@ -137,7 +146,7 @@ func (s *SQLStorage) RemoveLink(ctx context.Context, id int64, link string) erro
 	return err
 }
 
-func (s *SQLStorage) GetTags(ctx context.Context, id int64) map[int64][]string {
+func (s *SQLLinkService) GetTags(ctx context.Context, id int64) map[int64][]string {
 	rows, err := s.db.Query(ctx, `
         SELECT lt.link_id, t.name 
         FROM tags t
@@ -173,7 +182,7 @@ func (s *SQLStorage) GetTags(ctx context.Context, id int64) map[int64][]string {
 	return tagsByID
 }
 
-func (s *SQLStorage) GetFilters(ctx context.Context, id int64) map[int64][]string {
+func (s *SQLLinkService) GetFilters(ctx context.Context, id int64) map[int64][]string {
 	rows, err := s.db.Query(ctx, `
         SELECT lf.link_id, f.name 
         FROM filters f
@@ -209,7 +218,7 @@ func (s *SQLStorage) GetFilters(ctx context.Context, id int64) map[int64][]strin
 	return filtersByID
 }
 
-func (s *SQLStorage) GetLinks(ctx context.Context, id int64) ([]scrappertypes.LinkResponse, error) {
+func (s *SQLLinkService) GetLinks(ctx context.Context, id int64) ([]scrappertypes.LinkResponse, error) {
 	rows, err := s.db.Query(ctx, `
         SELECT l.id, l.url, l.changed_at
         FROM links l
@@ -246,7 +255,7 @@ func (s *SQLStorage) GetLinks(ctx context.Context, id int64) ([]scrappertypes.Li
 	return links, nil
 }
 
-func (s *SQLStorage) IsURLInAdded(ctx context.Context, id int64, u string) bool {
+func (s *SQLLinkService) IsURLInAdded(ctx context.Context, id int64, u string) bool {
 	var exists bool
 
 	err := s.db.QueryRow(ctx, `
@@ -266,7 +275,7 @@ func (s *SQLStorage) IsURLInAdded(ctx context.Context, id int64, u string) bool 
 	return exists
 }
 
-func (s *SQLStorage) GetBatchOfLinks(ctx context.Context, batch int, lastID int64) (links []scrappertypes.LinkResponse,
+func (s *SQLLinkService) GetBatchOfLinks(ctx context.Context, batch int, lastID int64) (links []scrappertypes.LinkResponse,
 	lastReturnedID int64) {
 	rows, err := s.db.Query(ctx, `
 			SELECT id, url FROM links
@@ -294,7 +303,7 @@ func (s *SQLStorage) GetBatchOfLinks(ctx context.Context, batch int, lastID int6
 	return links, lastReturnedID
 }
 
-func (s *SQLStorage) GetPreviousUpdate(ctx context.Context, id int64) time.Time {
+func (s *SQLLinkService) GetPreviousUpdate(ctx context.Context, id int64) time.Time {
 	var updTime time.Time
 
 	err := s.db.QueryRow(ctx, `
@@ -307,7 +316,7 @@ func (s *SQLStorage) GetPreviousUpdate(ctx context.Context, id int64) time.Time 
 	return updTime
 }
 
-func (s *SQLStorage) SaveLastUpdate(ctx context.Context, id int64, updTime time.Time) error {
+func (s *SQLLinkService) SaveLastUpdate(ctx context.Context, id int64, updTime time.Time) error {
 	_, err := s.db.Exec(ctx, `
         UPDATE links
         SET changed_at = $1
@@ -317,7 +326,7 @@ func (s *SQLStorage) SaveLastUpdate(ctx context.Context, id int64, updTime time.
 	return err
 }
 
-func (s *SQLStorage) GetTgChatIDsForLink(ctx context.Context, link string) []int64 {
+func (s *SQLLinkService) GetTgChatIDsForLink(ctx context.Context, link string) []int64 {
 	rows, err := s.db.Query(ctx, `
         SELECT u.telegram_id
         FROM users u
@@ -346,6 +355,6 @@ func (s *SQLStorage) GetTgChatIDsForLink(ctx context.Context, link string) []int
 	return tgIDs
 }
 
-func (s *SQLStorage) Close() {
+func (s *SQLLinkService) Close() {
 	s.db.Close()
 }

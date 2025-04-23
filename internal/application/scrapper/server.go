@@ -21,11 +21,11 @@ import (
 )
 
 type Server struct {
-	Storage   repository.Storage
+	Storage   repository.LinkService
 	BotClient HTTPBotClient
 }
 
-func NewServer(storage repository.Storage, client HTTPBotClient) *Server {
+func NewServer(storage repository.LinkService, client HTTPBotClient) *Server {
 	return &Server{
 		Storage:   storage,
 		BotClient: client,
@@ -239,8 +239,9 @@ func (s *Server) GetLinks(w http.ResponseWriter, r *http.Request) {
 	}
 
 	links, errGet := s.Storage.GetLinks(ctx, id)
-
 	if errGet != nil {
+		slog.Error("Error getting link",
+			slog.String("error", errGet.Error()))
 		http.Error(w, "Chat not found.", http.StatusNotFound)
 	} else {
 		response1 := scrappertypes.ListLinksResponse{Links: links, Size: len(links)}

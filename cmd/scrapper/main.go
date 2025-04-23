@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"go-progira/internal/application/scrapper"
 	repository "go-progira/internal/repository/sql_database"
 	"go-progira/pkg"
@@ -41,6 +42,9 @@ func migrate(migrationsPath, connString string) error {
 
 	err = migrator.ApplyMigrations(conn)
 	if err != nil {
+		slog.Error("Failed to apply migrations",
+			slog.String("error", err.Error()))
+
 		return err
 	}
 
@@ -62,8 +66,15 @@ func main() {
 		return
 	}
 
-	storage, err := repository.NewSQLStorage(connString)
-	if errors.Is(err, repository.ErrPoolCreate) {
+	linkServiceType, err := envData.GetByKeyFromEnv("LINK_SERVICE")
+	if errors.Is(err, e.ErrNoValInEnv) {
+		slog.Error(err.Error())
+
+		return
+	}
+
+	storage, err := repository.NewLinkService(linkServiceType, connString)
+	if err != nil {
 		slog.Error(err.Error())
 
 		return
@@ -81,7 +92,15 @@ func main() {
 		return
 	}
 
-	botClient := scrapper.NewBotClient("http", "bot:8090", "/updates")
+	slog.Info("Migrations successfully applied")
+
+	botHost, err := envData.GetByKeyFromEnv("BOT_HOST")
+	if errors.Is(err, e.ErrNoValInEnv) {
+		fmt.Println(err.Error())
+		return
+	}
+
+	botClient := scrapper.NewBotClient("http", botHost, "/updates")
 	scr := scrapper.NewServer(storage, botClient)
 
 	batchStr, errLoad := envData.GetByKeyFromEnv("BATCH")
