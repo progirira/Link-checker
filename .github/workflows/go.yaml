@@ -10,7 +10,7 @@ jobs:
   build:
     runs-on: edu-self-hosted
     container:
-      image: maven:3-eclipse-temurin-23
+      image: maven:3-eclipse-temurin-24
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
