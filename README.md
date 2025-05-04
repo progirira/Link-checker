@@ -1,3 +1,4 @@
+Create draft pull request
 # Шаблон Go-проекта для домашних заданий
 
 Шаблон для домашних заданий [Академии Бэкенда 2024](https://edu.tinkoff.ru/all-activities/courses/870efa9d-7067-4713-97ae-7db256b73eab).
