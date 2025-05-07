@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"go-progira/internal/application/bot/clients"
 	"go-progira/internal/domain/types/bottypes"
+	"go-progira/pkg/config"
 	"go-progira/pkg/e"
 	"log/slog"
 	"net/http"
@@ -83,18 +84,19 @@ func sendErrorResponse(w http.ResponseWriter, desc, code, exceptionName, excepti
 	}
 }
 
-func (s *Server) Start() {
+func (s *Server) Start(config *config.Config) {
 	http.HandleFunc("/updates", s.handleUpdates)
 
 	srv := &http.Server{
-		Addr:         ":8090",
+		Addr:         config.BotHost,
 		Handler:      nil,
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
 		IdleTimeout:  60 * time.Second,
 	}
 
-	slog.Debug("Starting server on :8090...")
+	slog.Info("Starting bot server on",
+		slog.String("address", config.BotHost))
 
 	go func() {
 		if err := srv.ListenAndServe(); err != nil {

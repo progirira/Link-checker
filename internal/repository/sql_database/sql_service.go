@@ -67,12 +67,10 @@ func (s *SQLLinkService) AddLink(ctx context.Context, id int64, url string, tags
 
 	var linkID int64
 
-	errQuery := tx.QueryRow(ctx,
-		"INSERT INTO links (url, changed_at) VALUES ($1, NOW()) ON CONFLICT (url) DO NOTHING RETURNING id",
-		url).Scan(&linkID)
-
+	_, errQuery := tx.Exec(ctx,
+		"INSERT INTO links (url, changed_at) VALUES ($1, NOW()) ON CONFLICT (url) DO NOTHING", url)
 	if errQuery != nil {
-		slog.Error("Query Exec error")
+		slog.Error("Query Exec error" + errQuery.Error())
 
 		errRollback := tx.Rollback(ctx)
 		if errRollback != nil {
@@ -82,54 +80,60 @@ func (s *SQLLinkService) AddLink(ctx context.Context, id int64, url string, tags
 		return errQuery
 	}
 
-	if linkID == 0 {
-		err = tx.QueryRow(ctx, "SELECT id FROM links WHERE url = $1", url).Scan(&linkID)
-		if err != nil {
-			slog.Error(ErrExecQuery.Error(),
-				slog.String("error", err.Error()))
+	linkID, err = s.GetLinkIDByURL(ctx, url)
 
-			slog.Error("Invalid ID",
-				slog.Int("id", int(linkID)))
+	if err != nil {
+		slog.Error("Query Exec error" + err.Error())
+
+		errRollback := tx.Rollback(ctx)
+		if errRollback != nil {
+			return errRollback
 		}
+
+		return err
 	}
 
 	_, err = tx.Exec(ctx,
 		"INSERT INTO link_users (user_id, link_id) VALUES ((SELECT id FROM users WHERE telegram_id = $1), $2) ON CONFLICT DO NOTHING",
 		id, linkID)
 	if err != nil {
-		slog.Error(ErrExecQuery.Error(),
-			slog.String("error", err.Error()))
+		slog.Error(ErrExecQuery.Error() + err.Error())
 	}
 
-	for _, tag := range tags {
-		var tagID int64
+	var elementID int64
 
-		err := tx.QueryRow(ctx, "INSERT INTO tags (name) VALUES ($1) ON CONFLICT (name) DO NOTHING RETURNING id", tag).Scan(&tagID)
+	for _, tag := range tags {
+		err := tx.QueryRow(ctx, "INSERT INTO tags (name) VALUES ($1) ON CONFLICT (name) DO NOTHING RETURNING id", tag).Scan(&elementID)
 		if err == nil {
-			_, err = tx.Exec(ctx, "INSERT INTO link_tags (link_id, tag_id) VALUES ($1, $2) ON CONFLICT DO NOTHING", linkID, tagID)
+			_, err = tx.Exec(ctx, "INSERT INTO link_tags (link_id, tag_id) VALUES ($1, $2) ON CONFLICT DO NOTHING", linkID, elementID)
 
 			if err != nil {
-				slog.Error(ErrExecQuery.Error())
-				slog.String("error", err.Error())
+				slog.Error(ErrExecQuery.Error() + err.Error())
 			}
 		}
 	}
 
 	for _, filter := range filters {
-		var filterID int64
-
-		err := tx.QueryRow(ctx, "INSERT INTO filters (name) VALUES ($1) ON CONFLICT (name) DO NOTHING RETURNING id", filter).Scan(&filterID)
+		err := tx.QueryRow(ctx, "INSERT INTO filters (name) VALUES ($1) ON CONFLICT (name) DO NOTHING RETURNING id", filter).Scan(&elementID)
 		if err == nil {
-			_, err = tx.Exec(ctx, "INSERT INTO link_filters (link_id, filter_id) VALUES ($1, $2) ON CONFLICT DO NOTHING", linkID, filterID)
+			_, err = tx.Exec(ctx, "INSERT INTO link_filters (link_id, filter_id) VALUES ($1, $2) ON CONFLICT DO NOTHING", linkID, elementID)
 
 			if err != nil {
-				slog.Error(ErrExecQuery.Error())
-				slog.String("error", err.Error())
+				slog.Error(ErrExecQuery.Error() + err.Error())
 			}
 		}
 	}
 
 	return tx.Commit(ctx)
+}
+
+func (s *SQLLinkService) GetLinkIDByURL(ctx context.Context, url string) (linkID int64, err error) {
+	err = s.db.QueryRow(ctx, "SELECT id FROM links WHERE url = $1", url).Scan(&linkID)
+	if err != nil {
+		slog.Error(ErrExecQuery.Error() + err.Error())
+	}
+
+	return linkID, err
 }
 
 func (s *SQLLinkService) RemoveLink(ctx context.Context, id int64, link string) error {

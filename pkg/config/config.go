@@ -21,6 +21,7 @@ type Config struct {
 	LinkService         string
 	MigrationsPath      string
 	Batch               int
+	Workers             int
 }
 
 type Env struct{}
@@ -47,6 +48,11 @@ func LoadConfig(filename string) (Config, error) {
 		errs = append(errs, "missing env: BATCH")
 	}
 
+	workersStr, errLoad := envData.GetByKeyFromEnv("NUMBER_OF_WORKERS")
+	if errLoad != nil {
+		errs = append(errs, "missing env: NUMBER_OF_WORKERS")
+	}
+
 	if len(errs) > 0 {
 		return Config{}, fmt.Errorf("config errors:\n%s", strings.Join(errs, "\n"))
 	}
@@ -56,6 +62,13 @@ func LoadConfig(filename string) (Config, error) {
 		slog.Error(err.Error())
 
 		return Config{}, fmt.Errorf("cannot convert string BATCH to int")
+	}
+
+	numOfWorkers, err := strconv.Atoi(workersStr)
+	if errors.Is(err, e.ErrNoValInEnv) {
+		slog.Error(err.Error())
+
+		return Config{}, fmt.Errorf("cannot convert string NUMBER_OF_WORKERS to int")
 	}
 
 	return Config{
@@ -68,6 +81,7 @@ func LoadConfig(filename string) (Config, error) {
 		LinkService:         get("LINK_SERVICE"),
 		MigrationsPath:      get("MIGRATIONS_PATH"),
 		Batch:               batch,
+		Workers:             numOfWorkers,
 	}, nil
 }
 

@@ -30,7 +30,7 @@ func main() {
 
 	slog.Info("Bot server created")
 
-	server.Start()
+	server.Start(&appConfig)
 
 	manager := processing.NewManager(&tgClient, &scrapClient)
 

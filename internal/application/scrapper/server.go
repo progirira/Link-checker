@@ -12,9 +12,11 @@ import (
 	"go-progira/pkg/config"
 	"go-progira/pkg/e"
 	"log/slog"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-co-op/gocron"
@@ -37,10 +39,11 @@ func (s *Server) Start(config *config.Config) {
 	http.HandleFunc("/links", s.LinksHandler)
 	s.startScheduler(config)
 
-	slog.Debug("Starting server on :8080...")
+	slog.Info("Starting scrapper server on",
+		slog.String("address", config.ScrapperHost))
 
 	srv := &http.Server{
-		Addr:         ":8080",
+		Addr:         config.ScrapperHost,
 		Handler:      nil,
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
@@ -55,58 +58,104 @@ func (s *Server) Start(config *config.Config) {
 	}
 }
 
+func (s *Server) processLink(ctx context.Context, link *scrappertypes.LinkResponse) {
+	prevTime := s.Storage.GetPreviousUpdate(ctx, link.ID)
+
+	var lastUpdateTime time.Time
+
+	var msg string
+
+	if updater, ok := api.GetUpdater(link.URL); ok {
+		msg, lastUpdateTime = updater.GetUpdates(link.URL, prevTime)
+		if msg == "" {
+			return
+		}
+	} else {
+		slog.Error(
+			e.ErrWrongURLFormat.Error(),
+			slog.String("url", link.URL),
+		)
+
+		return
+	}
+
+	errSave := s.saveLastUpdate(ctx, link.ID, lastUpdateTime)
+	if errSave != nil {
+		slog.Error("Error saving update")
+
+		return
+	}
+
+	IDs := s.Storage.GetTgChatIDsForLink(ctx, link.URL)
+
+	if len(IDs) == 0 {
+		return
+	}
+
+	updForBot := bottypes.LinkUpdate{
+		URL:         link.URL,
+		Description: msg,
+		TgChatIDs:   IDs,
+	}
+
+	errSend := s.BotClient.SendUpdate(updForBot)
+	if errSend != nil {
+		return
+	}
+}
+
+func splitIntoChunks(links []scrappertypes.LinkResponse, numChunks int) [][]scrappertypes.LinkResponse {
+	var chunks [][]scrappertypes.LinkResponse
+
+	chunkSize := int(math.Ceil(float64(len(links)) / float64(numChunks)))
+
+	for i := 0; i < len(links); i += chunkSize {
+		end := i + chunkSize
+		if end > len(links) {
+			end = len(links)
+		}
+
+		chunks = append(chunks, links[i:end])
+	}
+
+	return chunks
+}
+
+func (s *Server) processChunk(ctx context.Context, chunk []scrappertypes.LinkResponse, wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	for _, link := range chunk {
+		s.processLink(ctx, &link)
+	}
+}
+
 func (s *Server) monitorLinks(config *config.Config) {
 	ctx := context.Background()
+
+	if config.Workers <= 0 {
+		slog.Error("Invalid number of workers, it must be greater than zero",
+			slog.Int("given number of workers", config.Workers),
+			slog.String("action", "not processing batches, returning from monitor links"))
+
+		return
+	}
 
 	links, lastID := s.Storage.GetBatchOfLinks(ctx, config.Batch, int64(0))
 
 	api.InitUpdaters(config.StackoverflowAPIKey)
 
 	for len(links) != 0 {
-		for _, link := range links {
-			prevTime := s.Storage.GetPreviousUpdate(ctx, link.ID)
+		chunks := splitIntoChunks(links, config.Workers)
 
-			var lastUpdateTime time.Time
+		var wg sync.WaitGroup
 
-			var msg string
+		wg.Add(config.Workers)
 
-			if updater, ok := api.GetUpdater(link.URL); ok {
-				msg, lastUpdateTime = updater.GetUpdates(link.URL, prevTime)
-				if msg == "" {
-					continue
-				}
-			} else {
-				slog.Error(
-					e.ErrWrongURLFormat.Error(),
-					slog.String("url", link.URL),
-				)
-
-				return
-			}
-
-			errSave := s.saveLastUpdate(ctx, link.ID, lastUpdateTime)
-			if errSave != nil {
-				slog.Error("Error saving update")
-				continue
-			}
-
-			IDs := s.Storage.GetTgChatIDsForLink(ctx, link.URL)
-
-			if len(IDs) == 0 {
-				continue
-			}
-
-			updForBot := bottypes.LinkUpdate{
-				URL:         link.URL,
-				Description: msg,
-				TgChatIDs:   IDs,
-			}
-
-			errSend := s.BotClient.SendUpdate(updForBot)
-			if errSend != nil {
-				return
-			}
+		for _, chunk := range chunks {
+			go s.processChunk(ctx, chunk, &wg)
 		}
+
+		wg.Wait()
 
 		links, lastID = s.Storage.GetBatchOfLinks(ctx, config.Batch, lastID)
 	}
@@ -117,6 +166,7 @@ func (s *Server) saveLastUpdate(ctx context.Context, linkID int64, lastUpdateTim
 	if err != nil {
 		slog.Error("Failed to save last update time",
 			slog.Int("link id", int(linkID)))
+
 		return err
 	}
 
