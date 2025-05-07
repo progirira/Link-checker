@@ -32,10 +32,10 @@ func NewServer(storage repository.LinkService, client HTTPBotClient) *Server {
 	}
 }
 
-func (s *Server) Start(batch int) {
+func (s *Server) Start(config *config.Config) {
 	http.HandleFunc("/tg-chat/{id}", s.ChatHandler)
 	http.HandleFunc("/links", s.LinksHandler)
-	s.startScheduler(batch)
+	s.startScheduler(config)
 
 	slog.Debug("Starting server on :8080...")
 
@@ -55,19 +55,12 @@ func (s *Server) Start(batch int) {
 	}
 }
 
-func (s *Server) monitorLinks(batch int) {
+func (s *Server) monitorLinks(config *config.Config) {
 	ctx := context.Background()
 
-	links, lastID := s.Storage.GetBatchOfLinks(ctx, batch, int64(0))
+	links, lastID := s.Storage.GetBatchOfLinks(ctx, config.Batch, int64(0))
 
-	envData, errLoadEnv := config.Set(".env")
-	if errLoadEnv != nil {
-		return
-	}
-
-	apiKey, _ := envData.GetByKeyFromEnv("STACKOVERFLOW_API_KEY")
-
-	api.InitUpdaters(apiKey)
+	api.InitUpdaters(config.StackoverflowAPIKey)
 
 	for len(links) != 0 {
 		for _, link := range links {
@@ -115,7 +108,7 @@ func (s *Server) monitorLinks(batch int) {
 			}
 		}
 
-		links, lastID = s.Storage.GetBatchOfLinks(ctx, batch, lastID)
+		links, lastID = s.Storage.GetBatchOfLinks(ctx, config.Batch, lastID)
 	}
 }
 
@@ -130,13 +123,13 @@ func (s *Server) saveLastUpdate(ctx context.Context, linkID int64, lastUpdateTim
 	return nil
 }
 
-func (s *Server) startScheduler(batch int) {
+func (s *Server) startScheduler(config *config.Config) {
 	slog.Info("Scheduler started")
 
 	sc := gocron.NewScheduler(time.UTC)
 
 	_, err := sc.Every(10).Minutes().Do(func() {
-		go s.monitorLinks(batch)
+		go s.monitorLinks(config)
 	})
 	if err != nil {
 		slog.Error(

@@ -3,16 +3,13 @@ package main
 import (
 	"database/sql"
 	"errors"
-	"fmt"
 	"go-progira/internal/application/scrapper"
 	repository "go-progira/internal/repository/sql_database"
 	"go-progira/pkg"
 	"go-progira/pkg/config"
-	"go-progira/pkg/e"
 	"log/slog"
 	"os"
 	"os/signal"
-	"strconv"
 	"syscall"
 )
 
@@ -54,65 +51,33 @@ func migrate(migrationsPath, connString string) error {
 func main() {
 	pkg.SetNewStdoutLogger()
 
-	envData, errLoadEnv := config.Set(".env")
+	appConfig, errLoadEnv := config.LoadConfig(".env")
 	if errLoadEnv != nil {
+		slog.Error(errLoadEnv.Error(),
+			slog.String("error", errLoadEnv.Error()))
 		return
 	}
 
-	connString, err := envData.GetByKeyFromEnv("DATABASE_URL")
-	if errors.Is(err, e.ErrNoValInEnv) {
-		slog.Error(err.Error())
-
-		return
-	}
-
-	linkServiceType, err := envData.GetByKeyFromEnv("LINK_SERVICE")
-	if errors.Is(err, e.ErrNoValInEnv) {
-		slog.Error(err.Error())
-
-		return
-	}
-
-	storage, err := repository.NewLinkService(linkServiceType, connString)
+	storage, err := repository.NewLinkService(appConfig.LinkService, appConfig.DatabaseURL)
 	if err != nil {
 		slog.Error(err.Error())
 
 		return
 	}
 
-	migrationsPath, err := envData.GetByKeyFromEnv("MIGRATIONS_PATH")
-	if errors.Is(err, e.ErrNoValInEnv) {
-		slog.Error(err.Error())
-
-		return
-	}
-
-	err = migrate(migrationsPath, connString)
+	err = migrate(appConfig.MigrationsPath, appConfig.DatabaseURL)
 	if err != nil {
 		return
 	}
 
 	slog.Info("Migrations successfully applied")
 
-	botHost, err := envData.GetByKeyFromEnv("BOT_HOST")
-	if errors.Is(err, e.ErrNoValInEnv) {
-		fmt.Println(err.Error())
-		return
-	}
-
-	botClient := scrapper.NewBotClient("http", botHost, "/updates")
+	botClient := scrapper.NewBotClient("http", appConfig.BotHost, "/updates")
 	scr := scrapper.NewServer(storage, botClient)
 
-	batchStr, errLoad := envData.GetByKeyFromEnv("BATCH")
-	if errLoad != nil {
-		return
-	}
-
-	batch, _ := strconv.Atoi(batchStr)
-
 	slog.Info("Going to start scrapper server",
-		slog.Int("Batch", batch))
-	scr.Start(batch)
+		slog.Int("Batch", appConfig.Batch))
+	scr.Start(&appConfig)
 
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)

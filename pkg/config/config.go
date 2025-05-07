@@ -3,13 +3,73 @@ package config
 import (
 	"bufio"
 	"errors"
+	"fmt"
 	"go-progira/pkg/e"
 	"log/slog"
 	"os"
+	"strconv"
 	"strings"
 )
 
+type Config struct {
+	TgAPIToken          string
+	StackoverflowAPIKey string
+	TgBotHost           string
+	BotHost             string
+	ScrapperHost        string
+	DatabaseURL         string
+	LinkService         string
+	MigrationsPath      string
+	Batch               int
+}
+
 type Env struct{}
+
+func LoadConfig(filename string) (Config, error) {
+	var errs []string
+
+	envData, errLoadEnv := Set(filename)
+	if errLoadEnv != nil {
+		return Config{}, errLoadEnv
+	}
+
+	get := func(key string) string {
+		val, _ := envData.GetByKeyFromEnv(key)
+		if val == "" {
+			errs = append(errs, fmt.Sprintf("missing env: %s", key))
+		}
+
+		return val
+	}
+
+	batchStr, errLoad := envData.GetByKeyFromEnv("BATCH")
+	if errLoad != nil {
+		errs = append(errs, "missing env: BATCH")
+	}
+
+	if len(errs) > 0 {
+		return Config{}, fmt.Errorf("config errors:\n%s", strings.Join(errs, "\n"))
+	}
+
+	batch, err := strconv.Atoi(batchStr)
+	if errors.Is(err, e.ErrNoValInEnv) {
+		slog.Error(err.Error())
+
+		return Config{}, fmt.Errorf("cannot convert string BATCH to int")
+	}
+
+	return Config{
+		TgAPIToken:          get("TELEGRAM_BOT_API_TOKEN"),
+		StackoverflowAPIKey: get("STACKOVERFLOW_API_KEY"),
+		TgBotHost:           get("TELEGRAM_BOT_HOST"),
+		BotHost:             get("BOT_HOST"),
+		ScrapperHost:        get("SCRAPPER_HOST"),
+		DatabaseURL:         get("DATABASE_URL"),
+		LinkService:         get("LINK_SERVICE"),
+		MigrationsPath:      get("MIGRATIONS_PATH"),
+		Batch:               batch,
+	}, nil
+}
 
 func Set(filename string) (*Env, error) {
 	errLoad := loadEnv(filename)

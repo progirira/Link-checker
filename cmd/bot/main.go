@@ -1,50 +1,30 @@
 package main
 
 import (
-	"errors"
-	"fmt"
 	"go-progira/internal/application/bot/clients"
 	"go-progira/internal/application/bot/processing"
 	"go-progira/pkg"
 	"go-progira/pkg/config"
-	"go-progira/pkg/e"
 	"log/slog"
 )
 
 func main() {
 	pkg.SetNewStdoutLogger()
 
-	envData, errLoadEnv := config.Set(".env")
+	appConfig, errLoadEnv := config.LoadConfig(".env")
 	if errLoadEnv != nil {
+		slog.Error(errLoadEnv.Error(),
+			slog.String("error", errLoadEnv.Error()))
 		return
 	}
 
-	token, err := envData.GetByKeyFromEnv("TELEGRAM_BOT_API_TOKEN")
-	if errors.Is(err, e.ErrNoValInEnv) {
-		fmt.Println(err.Error())
-		return
-	}
-
-	tgHost, err := envData.GetByKeyFromEnv("TELEGRAM_BOT_HOST")
-	if errors.Is(err, e.ErrNoValInEnv) {
-		fmt.Println(err.Error())
-
-		return
-	}
-
-	tgClient := clients.NewTelegramClient("https", tgHost, token)
+	tgClient := clients.NewTelegramClient("https", appConfig.TgBotHost, appConfig.TgAPIToken)
 	slog.Info("Telegram client created",
-		slog.String("host", tgHost))
+		slog.String("host", appConfig.TgBotHost))
 
-	scrapperHost, err := envData.GetByKeyFromEnv("SCRAPPER_HOST")
-	if errors.Is(err, e.ErrNoValInEnv) {
-		fmt.Println(err.Error())
-		return
-	}
-
-	scrapClient := clients.NewScrapperClient("http", scrapperHost)
+	scrapClient := clients.NewScrapperClient("http", appConfig.ScrapperHost)
 	slog.Info("Scrapper client created",
-		slog.String("host", scrapperHost))
+		slog.String("host", appConfig.ScrapperHost))
 
 	server := processing.NewServer(&tgClient)
 
