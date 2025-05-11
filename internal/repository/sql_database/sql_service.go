@@ -2,11 +2,15 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"go-progira/internal/domain/types/scrappertypes"
 	repository "go-progira/internal/repository/dictionary_storage"
+	"go-progira/pkg/e"
 	"log/slog"
 	"time"
+
+	"github.com/jackc/pgx/v4"
 
 	"github.com/jackc/pgx/v4/pgxpool"
 )
@@ -67,6 +71,11 @@ func (s *SQLLinkService) AddLink(ctx context.Context, id int64, url string, tags
 
 	var linkID int64
 
+	errScan := tx.QueryRow(ctx, `SELECT id FROM links WHERE url = $1`, url).Scan(&linkID)
+	if !errors.Is(errScan, pgx.ErrNoRows) {
+		return e.ErrLinkAlreadyExists
+	}
+
 	_, errQuery := tx.Exec(ctx,
 		"INSERT INTO links (url, changed_at) VALUES ($1, NOW()) ON CONFLICT (url) DO NOTHING", url)
 	if errQuery != nil {
@@ -80,74 +89,137 @@ func (s *SQLLinkService) AddLink(ctx context.Context, id int64, url string, tags
 		return errQuery
 	}
 
-	linkID, err = s.GetLinkIDByURL(ctx, url)
-
+	linkID, err = s.getLinkIDByURL(ctx, tx, url)
 	if err != nil {
-		slog.Error("Query Exec error" + err.Error())
-
-		errRollback := tx.Rollback(ctx)
-		if errRollback != nil {
-			return errRollback
-		}
-
 		return err
 	}
 
 	_, err = tx.Exec(ctx,
-		"INSERT INTO link_users (user_id, link_id) VALUES ((SELECT id FROM users WHERE telegram_id = $1), $2) ON CONFLICT DO NOTHING",
+		`INSERT INTO link_users (user_id, link_id) 
+				VALUES ((SELECT id FROM users WHERE telegram_id = $1), $2)
+				ON CONFLICT DO NOTHING`,
 		id, linkID)
 	if err != nil {
 		slog.Error(ErrExecQuery.Error() + err.Error())
 	}
 
-	var elementID int64
-
-	for _, tag := range tags {
-		err := tx.QueryRow(ctx, "INSERT INTO tags (name) VALUES ($1) ON CONFLICT (name) DO NOTHING RETURNING id", tag).Scan(&elementID)
-		if err == nil {
-			_, err = tx.Exec(ctx, "INSERT INTO link_tags (link_id, tag_id) VALUES ($1, $2) ON CONFLICT DO NOTHING", linkID, elementID)
-
-			if err != nil {
-				slog.Error(ErrExecQuery.Error() + err.Error())
-			}
-		}
+	err = s.saveTags(ctx, tx, id, linkID, tags)
+	if err != nil {
+		return err
 	}
 
-	for _, filter := range filters {
-		err := tx.QueryRow(ctx, "INSERT INTO filters (name) VALUES ($1) ON CONFLICT (name) DO NOTHING RETURNING id", filter).Scan(&elementID)
-		if err == nil {
-			_, err = tx.Exec(ctx, "INSERT INTO link_filters (link_id, filter_id) VALUES ($1, $2) ON CONFLICT DO NOTHING", linkID, elementID)
-
-			if err != nil {
-				slog.Error(ErrExecQuery.Error() + err.Error())
-			}
-		}
+	err = s.saveFilters(ctx, tx, id, linkID, filters)
+	if err != nil {
+		return err
 	}
 
 	return tx.Commit(ctx)
 }
 
-func (s *SQLLinkService) GetLinkIDByURL(ctx context.Context, url string) (linkID int64, err error) {
-	err = s.db.QueryRow(ctx, "SELECT id FROM links WHERE url = $1", url).Scan(&linkID)
+func (s *SQLLinkService) getLinkIDByURL(ctx context.Context, tx pgx.Tx, url string) (linkID int64, err error) {
+	err = tx.QueryRow(ctx, "SELECT id FROM links WHERE url = $1", url).Scan(&linkID)
 	if err != nil {
-		slog.Error(ErrExecQuery.Error() + err.Error())
+		slog.Error("Query Exec error" + err.Error())
+
+		errRollback := tx.Rollback(ctx)
+		if errRollback != nil {
+			return 0, errRollback
+		}
+
+		return 0, err
 	}
 
 	return linkID, err
 }
 
-func (s *SQLLinkService) RemoveLink(ctx context.Context, id int64, link string) error {
-	_, err := s.db.Exec(ctx, `
-        DELETE FROM link_users 
-        WHERE user_id = (SELECT id FROM users WHERE telegram_id = $1) 
-        AND link_id = (SELECT id FROM links WHERE url = $2)`, id, link)
-	if err != nil {
-		slog.Error(ErrRemoveLink.Error(),
-			slog.String("error", err.Error()),
-			slog.Int("id", int(id)))
+func (s *SQLLinkService) saveTags(ctx context.Context, tx pgx.Tx, userID, linkID int64, tags []string) error {
+	var elementID int64
+
+	var err error
+
+	for _, tag := range tags {
+		_, errInsert := tx.Exec(ctx, "INSERT INTO tags (name) VALUES ($1) ON CONFLICT (name) DO NOTHING", tag)
+		errSelect := tx.QueryRow(ctx, "SELECT id FROM tags WHERE name = $1", tag).Scan(&elementID)
+
+		if errInsert == nil && errSelect == nil {
+			_, err = tx.Exec(ctx, `INSERT INTO link_tags (link_id, tag_id, user_id) 
+						VALUES ($1, $2, (SELECT id FROM users WHERE telegram_id = $3)) 
+						ON CONFLICT DO NOTHING`, linkID, elementID, userID)
+			if err != nil {
+				slog.Error(ErrExecQuery.Error() + err.Error())
+			}
+		} else {
+			slog.Error(ErrExecQuery.Error())
+		}
 	}
 
-	return err
+	return nil
+}
+
+func (s *SQLLinkService) saveFilters(ctx context.Context, tx pgx.Tx, userID, linkID int64, filters []string) error {
+	var elementID int64
+
+	var err error
+
+	for _, filter := range filters {
+		_, errInsert := tx.Exec(ctx, "INSERT INTO filters (name) VALUES ($1) ON CONFLICT (name) DO NOTHING", filter)
+		errSelect := tx.QueryRow(ctx, "SELECT id FROM filters WHERE name = $1", filter).Scan(&elementID)
+
+		if errInsert == nil && errSelect == nil {
+			_, err = tx.Exec(ctx, `INSERT INTO link_filters (link_id, filter_id, user_id)
+					VALUES ($1, $2, (SELECT id FROM users WHERE telegram_id = $3))
+					ON CONFLICT DO NOTHING`, linkID, elementID, userID)
+
+			if err != nil {
+				slog.Error(ErrExecQuery.Error() + err.Error())
+			}
+		} else {
+			slog.Error(ErrExecQuery.Error())
+		}
+	}
+
+	return nil
+}
+
+func (s *SQLLinkService) RemoveLink(ctx context.Context, id int64, link string) error {
+	var linkID int64
+
+	err := s.db.QueryRow(ctx, `SELECT id FROM links WHERE url = $1`, link).Scan(&linkID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return e.ErrLinkNotFound
+		}
+
+		slog.Error("Error while getting link ID: " + err.Error())
+
+		return e.ErrDeleteLink
+	}
+
+	res, err := s.db.Exec(ctx, `
+        DELETE FROM link_users 
+        WHERE user_id = (SELECT id FROM users WHERE telegram_id = $1) 
+        AND link_id = $2`, id, linkID)
+	if err != nil {
+		slog.String("Error while deleting link: ", err.Error())
+
+		return e.ErrDeleteLink
+	}
+
+	rowsAffected := res.RowsAffected()
+	if rowsAffected == 0 {
+		return e.ErrLinkNotFound
+	}
+
+	_, err = s.db.Exec(ctx, `
+	DELETE FROM links
+	WHERE id = $1 AND NOT EXISTS (SELECT 1 FROM link_users WHERE link_id = $1)`, linkID)
+	if err != nil {
+		slog.String("Error while deleting link from link_users: ", err.Error())
+
+		return e.ErrDeleteLink
+	}
+
+	return nil
 }
 
 func (s *SQLLinkService) GetTags(ctx context.Context, id int64) map[int64][]string {
@@ -155,8 +227,7 @@ func (s *SQLLinkService) GetTags(ctx context.Context, id int64) map[int64][]stri
         SELECT lt.link_id, t.name 
         FROM tags t
         JOIN link_tags lt ON lt.tag_id = t.id
-        JOIN link_users lu ON lt.link_id = lu.link_id
-        JOIN users u ON u.id = lu.user_id
+        JOIN users u ON u.id = lt.user_id
         WHERE u.telegram_id = $1`, id)
 	if err != nil {
 		return nil
@@ -191,8 +262,7 @@ func (s *SQLLinkService) GetFilters(ctx context.Context, id int64) map[int64][]s
         SELECT lf.link_id, f.name 
         FROM filters f
         JOIN link_filters lf ON lf.filter_id = f.id
-        JOIN link_users lu ON lf.link_id = lu.link_id
-        JOIN users u ON u.id = lu.user_id
+        JOIN users u ON u.id = lf.user_id
         WHERE u.telegram_id = $1`, id)
 	if err != nil {
 		return nil
@@ -357,6 +427,26 @@ func (s *SQLLinkService) GetTgChatIDsForLink(ctx context.Context, link string) [
 	}
 
 	return tgIDs
+}
+
+func (s *SQLLinkService) DeleteTag(ctx context.Context, id int64, tag string) error {
+	res, err := s.db.Exec(ctx, `
+        DELETE FROM link_tags
+        WHERE user_id = (SELECT id FROM users WHERE telegram_id = $1) 
+        AND tag_id = (SELECT id FROM tags WHERE name = $2)`, id, tag)
+
+	if err != nil {
+		slog.Error("Error deleting tag: " + err.Error())
+
+		return err
+	}
+
+	rowsAffected := res.RowsAffected()
+	if rowsAffected == 0 {
+		return e.ErrTagNotFound
+	}
+
+	return nil
 }
 
 func (s *SQLLinkService) Close() {

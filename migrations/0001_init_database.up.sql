@@ -32,7 +32,13 @@ CREATE TABLE filters (
 CREATE TABLE link_filters (
                               link_id BIGINT REFERENCES links(id) ON DELETE CASCADE,
                               filter_id INT REFERENCES filters(id) ON DELETE CASCADE,
-                              PRIMARY KEY (link_id, filter_id)
+                              user_id BIGINT REFERENCES users(id) ON DELETE CASCADE,
+                              PRIMARY KEY (link_id, filter_id, user_id),
+                              FOREIGN KEY (link_id) REFERENCES links(id) ON DELETE CASCADE,
+                              FOREIGN KEY (filter_id) REFERENCES tags(id) ON DELETE CASCADE,
+                              FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                              FOREIGN KEY (link_id, user_id) REFERENCES link_users(link_id, user_id) ON DELETE CASCADE
+
 );
 
 CREATE TABLE tags (
@@ -43,5 +49,10 @@ CREATE TABLE tags (
 CREATE TABLE link_tags (
                            link_id BIGINT REFERENCES links(id) ON DELETE CASCADE,
                            tag_id INT REFERENCES tags(id) ON DELETE CASCADE,
-                           PRIMARY KEY (link_id, tag_id)
+                           user_id BIGINT REFERENCES users(id) ON DELETE CASCADE,
+                           PRIMARY KEY (link_id, tag_id, user_id),
+                           FOREIGN KEY (link_id) REFERENCES links(id) ON DELETE CASCADE,
+                           FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE,
+                           FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                           FOREIGN KEY (link_id, user_id) REFERENCES link_users(link_id, user_id) ON DELETE CASCADE
 );

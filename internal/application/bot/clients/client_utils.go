@@ -3,13 +3,12 @@ package clients
 import (
 	"bytes"
 	"go-progira/pkg/e"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
 )
 
-func DoRequest(client http.Client, method, scheme, host, path string, q url.Values, body []byte, isJSON bool) (io.ReadCloser, error) {
+func DoRequest(client http.Client, method, scheme, host, path string, q url.Values, body []byte, isJSON bool) (*http.Response, error) {
 	u := url.URL{
 		Scheme: scheme,
 		Host:   host,
@@ -45,5 +44,5 @@ func DoRequest(client http.Client, method, scheme, host, path string, q url.Valu
 		return nil, e.ErrDoRequest
 	}
 
-	return resp.Body, nil
+	return resp, nil
 }

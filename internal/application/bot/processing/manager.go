@@ -2,11 +2,13 @@ package processing
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"go-progira/internal/application/bot/clients"
 	"go-progira/internal/domain/botmessages"
 	"go-progira/internal/domain/types/scrappertypes"
 	"go-progira/internal/domain/types/telegramtypes"
+	"go-progira/pkg/e"
 	"log/slog"
 	"net/url"
 	"strings"
@@ -41,6 +43,23 @@ func NewManager(tgClient clients.HTTPTelegramClient, scrapClient clients.HTTPScr
 	}
 }
 
+func (m Manager) SetBotCommands() {
+	commands := []telegramtypes.BotCommand{
+		{Command: "/track", Description: "Начать отслеживать ссылку"},
+		{Command: "/untrack", Description: "Перестать отслеживать ссылку"},
+		{Command: "/list", Description: "Показать отслеживаемые ссылки"},
+		{Command: "/listbytags", Description: "Показать отслеживаемые ссылки с введёнными тегами"},
+		{Command: "/deletetag", Description: "Удалить введённый тег"},
+		{Command: "/help", Description: "Справка"},
+	}
+
+	errSet := m.TgClient.SetBotCommands(commands)
+	if errSet != nil {
+		slog.Error("Setting bot commands wasn't worked successfully")
+		slog.String("error", errSet.Error())
+	}
+}
+
 func (m Manager) HandleAwaitingStart(id int, text string) {
 	parts := strings.Fields(text)
 
@@ -52,26 +71,12 @@ func (m Manager) HandleAwaitingStart(id int, text string) {
 
 		err := m.TgClient.SendMessage(id, botmessages.MsgHello)
 		if err != nil {
-			slog.Error(("Error send mes to tg"),
-				slog.String("error", err.Error()))
+			slog.Error("Error send mes to tg" + err.Error())
 
 			return
 		}
 
-		commands := []telegramtypes.BotCommand{
-			{Command: "/track", Description: "Начать отслеживать ссылку"},
-			{Command: "/untrack", Description: "Перестать отслеживать ссылку"},
-			{Command: "/list", Description: "Показать отслеживаемые ссылки"},
-			{Command: "/help", Description: "Справка"},
-		}
-
-		errSet := m.TgClient.SetBotCommands(commands)
-		if errSet != nil {
-			slog.Error("Setting bot commands wasn't worked successfully")
-			slog.String("error", errSet.Error())
-
-			return
-		}
+		m.SetBotCommands()
 	case "/help":
 		m.SendHelp(id)
 	default:
@@ -112,6 +117,77 @@ func (m Manager) processListCommand(id int) {
 	}
 }
 
+func (m Manager) processListByTagCommand(id int, tags []string) {
+	if len(tags) == 0 {
+		err := m.TgClient.SendMessage(id, botmessages.MsgNoTags)
+		if err != nil {
+			slog.Error("Error sending message",
+				slog.String("error", err.Error()))
+		}
+
+		return
+	}
+
+	getLinksRequest := scrappertypes.GetLinksByTagsRequest{Tags: tags}
+
+	links, err := m.ScrapClient.GetLinksByTag(int64(id), getLinksRequest)
+	if err != nil {
+		slog.Error("Error getting links",
+			slog.String("error", err.Error()))
+
+		return
+	}
+
+	var msg string
+
+	if len(links.Links) == 0 {
+		if len(tags) == 1 {
+			msg = botmessages.MsgNoSavedPagesByTag
+		} else {
+			msg = botmessages.MsgNoSavedPagesByTags
+		}
+	} else {
+		msg = MakeLinkList(links.Links)
+	}
+
+	err = m.TgClient.SendMessage(id, msg)
+	if err != nil {
+		slog.Error("Error sending message",
+			slog.String("error", err.Error()))
+	}
+}
+
+func (m Manager) processDeleteTag(id int, tag string) {
+	if tag == "" {
+		errSendMes := m.TgClient.SendMessage(id, botmessages.MsgNoTags)
+		if errSendMes != nil {
+			slog.Error("Error sending message" + errSendMes.Error())
+		}
+
+		return
+	}
+
+	deleteTagRequest := scrappertypes.DeleteTagRequest{Tag: tag}
+
+	err := m.ScrapClient.DeleteTag(int64(id), deleteTagRequest)
+
+	var msg string
+
+	switch {
+	case err == nil:
+		msg = botmessages.MsgDeleted
+	case errors.Is(err, e.ErrTagNotFound):
+		msg = botmessages.MsgNoSavedPagesByTag
+	default:
+		msg = botmessages.MsgTagDeleteFailed
+	}
+
+	err = m.TgClient.SendMessage(id, msg)
+	if err != nil {
+		slog.Error("Error sending message" + err.Error())
+	}
+}
+
 func (m Manager) handleStart(id int, text string) {
 	parts := strings.Fields(text)
 
@@ -120,8 +196,7 @@ func (m Manager) handleStart(id int, text string) {
 		if len(parts) == 1 || !isValidURL(parts[1]) {
 			err := m.TgClient.SendMessage(id, botmessages.MsgUnknownCommand)
 			if err != nil {
-				slog.Error("Error sending message",
-					slog.String("error", err.Error()))
+				slog.Error("Error sending message" + err.Error())
 			}
 
 			return
@@ -131,8 +206,7 @@ func (m Manager) handleStart(id int, text string) {
 
 		err := m.TgClient.SendMessage(id, botmessages.MsgAddTags)
 		if err != nil {
-			slog.Error("Error sending message",
-				slog.String("error", err.Error()))
+			slog.Error("Error sending message" + err.Error())
 
 			return
 		}
@@ -143,8 +217,7 @@ func (m Manager) handleStart(id int, text string) {
 		if len(parts) == 1 || !isValidURL(parts[1]) {
 			err := m.TgClient.SendMessage(id, botmessages.MsgUnknownCommand)
 			if err != nil {
-				slog.Error("Error sending message",
-					slog.String("error", err.Error()))
+				slog.Error("Error sending message" + err.Error())
 			}
 
 			return
@@ -152,32 +225,44 @@ func (m Manager) handleStart(id int, text string) {
 
 		delReq := scrappertypes.RemoveLinkRequest{Link: parts[1]}
 
-		_, err := m.ScrapClient.RemoveLink(int64(id), delReq)
-		if err != nil {
+		err := m.ScrapClient.RemoveLink(int64(id), delReq)
+
+		var msg string
+
+		switch {
+		case err == nil:
+			msg = botmessages.MsgDeleted
+		case errors.Is(err, e.ErrLinkNotFound):
+			msg = botmessages.MsgLinkNotFound
+		default:
+			msg = botmessages.MsgErrDeleteLink
+
 			slog.Error("Error removing link",
 				slog.String("error", err.Error()),
 				slog.String("link", parts[1]))
-
-			return
 		}
 
-		errSendMes := m.TgClient.SendMessage(id, botmessages.MsgDeleted)
+		errSendMes := m.TgClient.SendMessage(id, msg)
 		if errSendMes != nil {
-			slog.Error("Error sending message",
-				slog.String("error", errSendMes.Error()))
+			slog.Error("Error sending message" + errSendMes.Error())
 		}
-
 	case "/list":
 		m.processListCommand(id)
+	case "/listbytags":
+		m.processListByTagCommand(id, parts[1:])
+	case "/deletetag":
+		m.processDeleteTag(id, parts[1])
 	case "/help":
 		m.SendHelp(id)
-
 	default:
-		err := m.TgClient.SendMessage(id, botmessages.MsgUnknownCommand)
-		if err != nil {
-			slog.Error("Error sending message",
-				slog.String("error", err.Error()))
-		}
+		m.processUnknownCommand(id)
+	}
+}
+
+func (m Manager) processUnknownCommand(id int) {
+	err := m.TgClient.SendMessage(id, botmessages.MsgUnknownCommand)
+	if err != nil {
+		slog.Error("Error sending message" + err.Error())
 	}
 }
 
@@ -230,14 +315,22 @@ func (m Manager) handleAwaitingFiltersForTrack(id int, text string) {
 	filters := splitByWords(text)
 	m.addRequests[id].Filters = filters
 	m.States[id] = StateStart
-	_, err := m.ScrapClient.AddLink(int64(id), *m.addRequests[id])
+	errAdd := m.ScrapClient.AddLink(int64(id), *m.addRequests[id])
 
-	errSendMes := m.TgClient.SendMessage(id, botmessages.MsgSaved)
-	if errSendMes != nil {
-		return
+	var msg string
+
+	switch {
+	case errAdd == nil:
+		msg = botmessages.MsgSaved
+	case errors.Is(errAdd, e.ErrLinkAlreadyExists):
+		msg = botmessages.MsgLinkAlreadyExists
+	case errors.Is(errAdd, e.ErrAddLink):
+		msg = botmessages.MsgErrAddLink
 	}
 
-	if err != nil {
+	errSendMes := m.TgClient.SendMessage(id, msg)
+	if errSendMes != nil {
+		slog.Error("Error sending message to tg:" + errSendMes.Error())
 		return
 	}
 }
@@ -265,8 +358,7 @@ func (m Manager) Start() {
 
 	err := m.TgClient.SetBotCommands(commands)
 	if err != nil {
-		slog.Error(("Setting bot commands wasn't worked successfully"),
-			slog.String("error", err.Error()))
+		slog.Error("Setting bot commands wasn't worked successfully" + err.Error())
 	}
 
 	m.buildHandlers()

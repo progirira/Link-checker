@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"go-progira/internal/application/scrapper/api"
-	"go-progira/internal/domain/botmessages"
 	"go-progira/internal/domain/types/bottypes"
 	"go-progira/internal/domain/types/scrappertypes"
 	repository "go-progira/internal/repository/dictionary_storage"
@@ -37,6 +36,7 @@ func NewServer(storage repository.LinkService, client HTTPBotClient) *Server {
 func (s *Server) Start(config *config.Config) {
 	http.HandleFunc("/tg-chat/{id}", s.ChatHandler)
 	http.HandleFunc("/links", s.LinksHandler)
+	http.HandleFunc("/tags", s.TagsHandler)
 	s.startScheduler(config)
 
 	slog.Info("Starting scrapper server on",
@@ -221,6 +221,23 @@ func (s *Server) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (s *Server) TagsHandler(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		s.GetLinksByTag(w, r)
+	case http.MethodDelete:
+		s.DeleteTag(w, r)
+	default:
+		slog.Error(
+			e.ErrMethodNotAllowed.Error(),
+			slog.String("method", r.Method),
+			slog.String("allowed methods", strings.Join([]string{http.MethodGet, http.MethodPost, http.MethodDelete}, " ")),
+		)
+
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
 func (s *Server) RegisterChat(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	idStr := r.URL.Path[len("/tg-chat/"):]
@@ -286,15 +303,18 @@ func (s *Server) GetLinks(w http.ResponseWriter, r *http.Request) {
 		slog.Error("Error getting link",
 			slog.String("error", errGet.Error()))
 		http.Error(w, "Chat not found.", http.StatusNotFound)
-	} else {
-		response1 := scrappertypes.ListLinksResponse{Links: links, Size: len(links)}
 
-		w.Header().Set("Content-Type", "application/json")
+		return
+	}
 
-		err = json.NewEncoder(w).Encode(response1)
-		if err != nil {
-			return
-		}
+	response1 := scrappertypes.ListLinksResponse{Links: links, Size: len(links)}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+
+	err = json.NewEncoder(w).Encode(response1)
+	if err != nil {
+		return
 	}
 }
 
@@ -318,30 +338,20 @@ func (s *Server) AddLink(w http.ResponseWriter, r *http.Request) {
 	}
 
 	errAppend := s.Storage.AddLink(ctx, id, request.Link, request.Tags, request.Filters)
-	if errAppend == nil {
-		return
-	}
-
-	if errors.Is(errAppend, e.ErrChatNotFound) {
-		http.Error(w, e.ErrChatNotFound.Error(), http.StatusNotFound)
-		return
-	}
 
 	if errors.Is(errAppend, e.ErrLinkAlreadyExists) {
-		update := bottypes.LinkUpdate{
-			ID:          id,
-			URL:         request.Link,
-			Description: botmessages.MsgAlreadyExists,
-			TgChatIDs:   []int64{id},
-		}
+		http.Error(w, e.ErrLinkAlreadyExists.Error(), http.StatusConflict)
 
-		err := s.BotClient.SendUpdate(update)
-		if err != nil {
-			return
-		}
+		return
+	} else if errAppend != nil {
+		slog.Error("Error adding link" + errAppend.Error())
+		http.Error(w, e.ErrAddLink.Error(), http.StatusInternalServerError)
+
+		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
 }
 
 func (s *Server) RemoveLink(w http.ResponseWriter, r *http.Request) {
@@ -373,13 +383,124 @@ func (s *Server) RemoveLink(w http.ResponseWriter, r *http.Request) {
 	}
 
 	errRemove := s.Storage.RemoveLink(ctx, id, request.Link)
-	if errRemove == nil {
+
+	switch {
+	case errRemove == nil:
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+	case errors.Is(errRemove, e.ErrLinkNotFound):
+		http.Error(w, "Link not found.", http.StatusNotFound)
+	default:
+		http.Error(w, "Error while deleting link", http.StatusInternalServerError)
+	}
+}
+
+func (s *Server) GetLinksByTag(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	chatIDStr := r.URL.Query().Get("Tg-Chat-Id")
+
+	id, err := strconv.ParseInt(chatIDStr, 10, 64)
+	if err != nil || id <= 0 {
+		http.Error(w, "Invalid chat ID", http.StatusBadRequest)
 		return
 	}
 
-	if errors.Is(errRemove, e.ErrChatNotFound) {
+	links, errGet := s.Storage.GetLinks(ctx, id)
+
+	if errGet != nil {
+		slog.Error("Error getting link",
+			slog.String("error", errGet.Error()))
 		http.Error(w, "Chat not found.", http.StatusNotFound)
-	} else {
-		http.Error(w, "Link not found.", http.StatusNotFound)
+
+		return
 	}
+
+	var request scrappertypes.GetLinksByTagsRequest
+	if errDecode := json.NewDecoder(r.Body).Decode(&request); errDecode != nil {
+		http.Error(w, "Invalid request.", http.StatusBadRequest)
+		return
+	}
+
+	if len(request.Tags) != 0 {
+		links = filterLinksByTags(links, request.Tags)
+	}
+
+	response1 := scrappertypes.ListLinksResponse{Links: links, Size: len(links)}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	err = json.NewEncoder(w).Encode(response1)
+	if err != nil {
+		return
+	}
+}
+
+func (s *Server) DeleteTag(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	chatIDStr := r.URL.Query().Get("Tg-Chat-Id")
+	id, err := strconv.ParseInt(chatIDStr, 10, 64)
+
+	if err != nil {
+		slog.Error("Error parsing id string",
+			slog.String("error", err.Error()))
+		return
+	}
+
+	if id <= 0 {
+		slog.Error("Error invalid id(less than zero)",
+			slog.Int("id", int(id)))
+
+		http.Error(w, "Invalid chat ID", http.StatusBadRequest)
+
+		return
+	}
+
+	var request scrappertypes.DeleteTagRequest
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		http.Error(w, "Invalid request.", http.StatusBadRequest)
+
+		return
+	}
+
+	errDelete := s.Storage.DeleteTag(ctx, id, request.Tag)
+	if errDelete != nil {
+		if errors.Is(errDelete, e.ErrTagNotFound) {
+			http.Error(w, "Error deleting tag", http.StatusNotFound)
+
+			return
+		}
+
+		http.Error(w, "Error deleting tag", http.StatusInternalServerError)
+
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+}
+
+func contains(listOfElems []string, elem string) bool {
+	for _, elemInList := range listOfElems {
+		if elemInList == elem {
+			return true
+		}
+	}
+
+	return false
+}
+
+func filterLinksByTags(links []scrappertypes.LinkResponse, tags []string) []scrappertypes.LinkResponse {
+	var listOfLinksByTag []scrappertypes.LinkResponse
+mainIt:
+	for _, linkResp := range links {
+		for _, tag := range tags {
+			if !contains(linkResp.Tags, tag) {
+				continue mainIt
+			}
+		}
+		listOfLinksByTag = append(listOfLinksByTag, linkResp)
+	}
+
+	return listOfLinksByTag
 }

@@ -34,4 +34,10 @@ var (
 	ErrChatAlreadyExists = errors.New("link already exists")
 	ErrLinkNotFound      = errors.New("link not found")
 	ErrLinkAlreadyExists = errors.New("link already exists")
+
+	ErrTagNotFound = errors.New("tag not found")
+	ErrDeleteTag   = errors.New("error deleting tag")
+
+	ErrAddLink    = errors.New("error adding link")
+	ErrDeleteLink = errors.New("error adding link")
 )

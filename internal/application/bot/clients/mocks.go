@@ -41,10 +41,10 @@ func (m *MockScrapClient) DeleteChat(chatID int64) {
 	m.Called(chatID)
 }
 
-func (m *MockScrapClient) AddLink(chatID int64, request scrappertypes.AddLinkRequest) (*scrappertypes.LinkResponse, error) {
+func (m *MockScrapClient) AddLink(chatID int64, request scrappertypes.AddLinkRequest) error {
 	args := m.Called(chatID, request)
 
-	return args.Get(0).(*scrappertypes.LinkResponse), args.Error(1)
+	return args.Error(0)
 }
 
 func (m *MockScrapClient) GetLinks(chatID int64) (*scrappertypes.ListLinksResponse, error) {
@@ -53,8 +53,21 @@ func (m *MockScrapClient) GetLinks(chatID int64) (*scrappertypes.ListLinksRespon
 	return args.Get(0).(*scrappertypes.ListLinksResponse), args.Error(1)
 }
 
-func (m *MockScrapClient) RemoveLink(chatID int64, request scrappertypes.RemoveLinkRequest) (*scrappertypes.LinkResponse, error) {
+func (m *MockScrapClient) RemoveLink(chatID int64, request scrappertypes.RemoveLinkRequest) error {
 	args := m.Called(chatID, request)
 
-	return args.Get(0).(*scrappertypes.LinkResponse), args.Error(1)
+	return args.Error(0)
+}
+
+func (m *MockScrapClient) GetLinksByTag(chatID int64, request scrappertypes.GetLinksByTagsRequest) (
+	*scrappertypes.ListLinksResponse, error) {
+	args := m.Called(chatID, request)
+
+	return args.Get(0).(*scrappertypes.ListLinksResponse), args.Error(1)
+}
+
+func (m *MockScrapClient) DeleteTag(chatID int64, request scrappertypes.DeleteTagRequest) error {
+	args := m.Called(chatID, request)
+
+	return args.Error(0)
 }

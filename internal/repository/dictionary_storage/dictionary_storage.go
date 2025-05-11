@@ -21,6 +21,7 @@ type LinkStorage interface {
 	GetLinks(ctx context.Context, id int64) ([]scrappertypes.LinkResponse, error)
 	IsURLInAdded(ctx context.Context, id int64, u string) bool
 	GetBatchOfLinks(context.Context, int, int64) ([]scrappertypes.LinkResponse, int64)
+	DeleteTag(ctx context.Context, id int64, tag string) error
 }
 
 type UpdateStorage interface {

@@ -57,7 +57,7 @@ func (c *TelegramClient) SetBotCommands(commands []telegramtypes.BotCommand) err
 		return errMarshal
 	}
 
-	_, errDoReq := DoRequest(c.Client, http.MethodPost, c.Scheme, c.Host, path.Join(c.BasePath, setCommandsMethod),
+	response, errDoReq := DoRequest(c.Client, http.MethodPost, c.Scheme, c.Host, path.Join(c.BasePath, setCommandsMethod),
 		nil, data, true)
 	if errDoReq != nil {
 		slog.Error(
@@ -69,6 +69,11 @@ func (c *TelegramClient) SetBotCommands(commands []telegramtypes.BotCommand) err
 		return errDoReq
 	}
 
+	errClose := response.Body.Close()
+	if errClose != nil {
+		slog.Error("Error closing response body" + errClose.Error())
+	}
+
 	return nil
 }
 
@@ -77,7 +82,7 @@ func (c *TelegramClient) Updates(offset, limit int) ([]byte, error) {
 	q.Add("offset", strconv.Itoa(offset))
 	q.Add("limit", strconv.Itoa(limit))
 
-	body, errDoReq := DoRequest(c.Client, http.MethodGet, c.Scheme, c.Host, path.Join(c.BasePath, getUpdatesMethod),
+	response, errDoReq := DoRequest(c.Client, http.MethodGet, c.Scheme, c.Host, path.Join(c.BasePath, getUpdatesMethod),
 		q, nil, false)
 	if errDoReq != nil {
 		slog.Error(
@@ -89,7 +94,13 @@ func (c *TelegramClient) Updates(offset, limit int) ([]byte, error) {
 		return nil, errDoReq
 	}
 
-	data, errRead := io.ReadAll(body)
+	data, errRead := io.ReadAll(response.Body)
+
+	errClose := response.Body.Close()
+	if errClose != nil {
+		slog.Error("Error closing response body" + errClose.Error())
+	}
+
 	if errRead != nil {
 		slog.Error(
 			e.ErrReadBody.Error(),
@@ -106,7 +117,7 @@ func (c *TelegramClient) SendMessage(chatID int, text string) error {
 	q.Add("chat_id", strconv.Itoa(chatID))
 	q.Add("text", text)
 
-	_, errDoReq := DoRequest(c.Client, http.MethodGet, c.Scheme, c.Host, path.Join(c.BasePath, sendMessageMethod),
+	response, errDoReq := DoRequest(c.Client, http.MethodGet, c.Scheme, c.Host, path.Join(c.BasePath, sendMessageMethod),
 		q, nil, false)
 	if errDoReq != nil {
 		slog.Error(
@@ -116,6 +127,15 @@ func (c *TelegramClient) SendMessage(chatID int, text string) error {
 		)
 
 		return errDoReq
+	}
+
+	if response == nil {
+		return nil
+	}
+
+	errClose := response.Body.Close()
+	if errClose != nil {
+		slog.Error("Error closing response body" + errClose.Error())
 	}
 
 	slog.Info("Sent message to tg",

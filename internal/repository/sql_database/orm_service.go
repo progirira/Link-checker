@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"go-progira/internal/domain/types/scrappertypes"
+	"go-progira/pkg/e"
 	"log/slog"
 	"time"
 
@@ -148,12 +149,12 @@ func (s *ORMLinkService) AddLink(ctx context.Context, id int64, url string, tags
 			slog.String("error", err.Error()))
 	}
 
-	err = s.addTags(ctx, linkID, tags)
+	err = s.addTags(ctx, id, linkID, tags)
 	if err != nil {
 		slog.Error("Error adding tags")
 	}
 
-	err = s.addFilters(ctx, linkID, filters)
+	err = s.addFilters(ctx, id, linkID, filters)
 	if err != nil {
 		slog.Error("Error adding filters")
 	}
@@ -161,25 +162,26 @@ func (s *ORMLinkService) AddLink(ctx context.Context, id int64, url string, tags
 	return tx.Commit(ctx)
 }
 
-func (s *ORMLinkService) RemoveLink(ctx context.Context, id int64, link string) error {
+func (s ORMLinkService) deleteElement(ctx context.Context, id int64, nameOfElem, nameOfElemInTable, valOfElem,
+	tableDeleteFrom string) error {
 	userSubquery, userArgs, errUser := sq.Select("id").From("users").Where(sq.Eq{"telegram_id": id}).ToSql()
-	linkSubquery, linkArgs, errLink := sq.Select("id").From("links").Where(sq.Eq{"url": link}).ToSql()
+	elemSubquery, elemArgs, errElem := sq.Select("id").From(nameOfElem + "s").Where(sq.Eq{nameOfElemInTable: valOfElem}).ToSql()
 
-	allArgs := make([]interface{}, 0, len(userArgs)+len(linkArgs))
+	allArgs := make([]interface{}, 0, len(userArgs)+len(elemArgs))
 	allArgs = append(allArgs, userArgs...)
-	allArgs = append(allArgs, linkArgs...)
+	allArgs = append(allArgs, elemArgs...)
 
-	query, _, err := sq.Delete("link_users").
+	query, _, err := sq.Delete(tableDeleteFrom).
 		Where(sq.Expr(fmt.Sprintf("user_id = (%s)", userSubquery))).
-		Where(sq.Expr(fmt.Sprintf("link_id = (%s)", linkSubquery))).
+		Where(sq.Expr(fmt.Sprintf("%s_id = (%s)", nameOfElem, elemSubquery))).
 		PlaceholderFormat(sq.Dollar).
 		ToSql()
 
-	slog.Info("DELETE LINK",
+	slog.Info("DELETE",
 		slog.String("query", query),
 		slog.Any("args", allArgs))
 
-	if errUser != nil || errLink != nil || err != nil {
+	if errUser != nil || errElem != nil || err != nil {
 		slog.Error("Unable to build DELETE query")
 
 		return err
@@ -187,9 +189,26 @@ func (s *ORMLinkService) RemoveLink(ctx context.Context, id int64, link string) 
 
 	_, err = s.db.Exec(ctx, query, allArgs...)
 	if err != nil {
-		slog.Error(ErrRemoveLink.Error(),
-			slog.String("error", err.Error()),
-			slog.Int("id", int(id)))
+		slog.Error(err.Error())
+	}
+
+	return err
+}
+
+func (s *ORMLinkService) RemoveLink(ctx context.Context, id int64, link string) error {
+	err := s.deleteElement(ctx, id, "link", "url", link, "link_users")
+
+	if err != nil {
+		slog.Error(e.ErrDeleteLink.Error() + err.Error())
+	}
+
+	return err
+}
+
+func (s *ORMLinkService) DeleteTag(ctx context.Context, id int64, tag string) error {
+	err := s.deleteElement(ctx, id, "tag", "name", tag, "link_tags")
+	if err != nil {
+		slog.Error(e.ErrDeleteTag.Error() + err.Error())
 	}
 
 	return err
@@ -224,8 +243,7 @@ func (s *ORMLinkService) GetTags(ctx context.Context, id int64) map[int64][]stri
 		Select("lt.link_id", "t.name").
 		From("tags t").
 		Join("link_tags lt ON lt.tag_id = t.id").
-		Join("link_users lu ON lt.link_id = lu.link_id").
-		Join("users u ON u.id = lu.user_id").
+		Join("users u ON u.id = lt.user_id").
 		Where(sq.Eq{"u.telegram_id": id}).
 		PlaceholderFormat(sq.Dollar).
 		ToSql()
@@ -259,8 +277,7 @@ func (s *ORMLinkService) GetFilters(ctx context.Context, id int64) map[int64][]s
 		Select("lf.link_id", "f.name").
 		From("filters f").
 		Join("link_filters lf ON lf.filter_id = f.id").
-		Join("link_users lu ON lf.link_id = lu.link_id").
-		Join("users u ON u.id = lu.user_id").
+		Join("users u ON u.id = lf.user_id").
 		Where(sq.Eq{"u.telegram_id": id}).
 		PlaceholderFormat(sq.Dollar).
 		ToSql()
@@ -529,7 +546,7 @@ func (s *ORMLinkService) Close() {
 	s.db.Close()
 }
 
-func (s *ORMLinkService) addTags(ctx context.Context, linkID int64, tags []string) error {
+func (s *ORMLinkService) addTags(ctx context.Context, tgID, linkID int64, tags []string) error {
 	tx, _ := s.db.Begin(ctx)
 
 	for _, tag := range tags {
@@ -538,42 +555,44 @@ func (s *ORMLinkService) addTags(ctx context.Context, linkID int64, tags []strin
 		sql, args, err := buildInsertQuery("tags",
 			[]string{"name"},
 			[]interface{}{tag},
-			"ON CONFLICT (name) DO NOTHING RETURNING id")
-
+			"ON CONFLICT (name) DO NOTHING")
 		if err != nil {
 			return err
 		}
 
-		err = tx.QueryRow(ctx, sql, args...).Scan(&tagID)
-		if errors.Is(err, pgx.ErrNoRows) {
-			sql, args, errBuildQuery := sq.
-				Select("id").
-				From("tags").
-				Where(sq.Eq{"name": tag}).
-				PlaceholderFormat(sq.Dollar).
-				ToSql()
-
-			if errBuildQuery != nil {
-				slog.Error("Unable to build SELECT query",
-					slog.String("error", errBuildQuery.Error()))
-
-				return errBuildQuery
-			}
-
-			errQuery := tx.QueryRow(ctx, sql, args...).Scan(&tagID)
-			if errQuery != nil {
-				slog.Error("Unable to execute query",
-					slog.String("error", errQuery.Error()))
-
-				return errQuery
-			}
-		} else if err != nil {
+		_, err = s.db.Exec(ctx, sql, args...)
+		if err != nil {
 			return err
 		}
 
+		sql, args, errBuildQuery := sq.
+			Select("id").
+			From("tags").
+			Where(sq.Eq{"name": tag}).
+			PlaceholderFormat(sq.Dollar).
+			ToSql()
+		if errBuildQuery != nil {
+			slog.Error("Unable to build SELECT query" + errBuildQuery.Error())
+
+			return errBuildQuery
+		}
+
+		errScan := tx.QueryRow(ctx, sql, args...).Scan(&tagID)
+		if errScan != nil {
+			slog.Error("Unable to execute query",
+				slog.String("error", errScan.Error()))
+
+			errRollback := tx.Rollback(ctx)
+			if errRollback != nil {
+				return errRollback
+			}
+
+			return errScan
+		}
+
 		sql, args, err = buildInsertQuery("link_tags",
-			[]string{"link_id", "tag_id"},
-			[]interface{}{linkID, tagID},
+			[]string{"link_id", "tag_id", "user_id"},
+			[]interface{}{linkID, tagID, tgID},
 			"ON CONFLICT DO NOTHING")
 
 		if err != nil {
@@ -583,8 +602,12 @@ func (s *ORMLinkService) addTags(ctx context.Context, linkID int64, tags []strin
 		_, err = tx.Exec(ctx, sql, args...)
 
 		if err != nil {
-			slog.Error(ErrExecQuery.Error())
-			slog.String("error", err.Error())
+			slog.Error(ErrExecQuery.Error() + err.Error())
+
+			errRollback := tx.Rollback(ctx)
+			if errRollback != nil {
+				return errRollback
+			}
 
 			return err
 		}
@@ -593,7 +616,7 @@ func (s *ORMLinkService) addTags(ctx context.Context, linkID int64, tags []strin
 	return tx.Commit(ctx)
 }
 
-func (s *ORMLinkService) addFilters(ctx context.Context, linkID int64, filters []string) error {
+func (s *ORMLinkService) addFilters(ctx context.Context, tgID, linkID int64, filters []string) error {
 	tx, _ := s.db.Begin(ctx)
 
 	for _, filter := range filters {
@@ -602,42 +625,45 @@ func (s *ORMLinkService) addFilters(ctx context.Context, linkID int64, filters [
 		sql, args, err := buildInsertQuery("filters",
 			[]string{"name"},
 			[]interface{}{filter},
-			"ON CONFLICT (name) DO NOTHING RETURNING id")
-
+			"ON CONFLICT (name) DO NOTHING")
 		if err != nil {
 			return err
 		}
 
-		err = tx.QueryRow(ctx, sql, args...).Scan(&filterID)
-		if errors.Is(err, pgx.ErrNoRows) {
-			sql, args, errBuildQuery := sq.
-				Select("id").
-				From("filters").
-				Where(sq.Eq{"name": filter}).
-				PlaceholderFormat(sq.Dollar).
-				ToSql()
-
-			if errBuildQuery != nil {
-				slog.Error("Unable to build SELECT query",
-					slog.String("error", errBuildQuery.Error()))
-
-				return errBuildQuery
-			}
-
-			errQuery := tx.QueryRow(ctx, sql, args...).Scan(&filterID)
-			if errQuery != nil {
-				slog.Error("Unable to execute query",
-					slog.String("error", errQuery.Error()))
-
-				return errQuery
-			}
-		} else if err != nil {
+		_, err = s.db.Exec(ctx, sql, args...)
+		if err != nil {
 			return err
 		}
 
+		sql, args, errBuildQuery := sq.
+			Select("id").
+			From("filters").
+			Where(sq.Eq{"name": filter}).
+			PlaceholderFormat(sq.Dollar).
+			ToSql()
+		if errBuildQuery != nil {
+			slog.Error("Unable to build SELECT query",
+				slog.String("error", errBuildQuery.Error()))
+
+			return errBuildQuery
+		}
+
+		errScan := tx.QueryRow(ctx, sql, args...).Scan(&filterID)
+		if errScan != nil {
+			slog.Error("Unable to execute query",
+				slog.String("error", errScan.Error()))
+
+			errRollback := tx.Rollback(ctx)
+			if errRollback != nil {
+				return errRollback
+			}
+
+			return errScan
+		}
+
 		sql, args, err = buildInsertQuery("link_filters",
-			[]string{"link_id", "filter_id"},
-			[]interface{}{linkID, filterID},
+			[]string{"link_id", "filter_id", "user_id"},
+			[]interface{}{linkID, filterID, tgID},
 			"ON CONFLICT DO NOTHING")
 
 		if err != nil {
@@ -647,8 +673,12 @@ func (s *ORMLinkService) addFilters(ctx context.Context, linkID int64, filters [
 		_, err = tx.Exec(ctx, sql, args...)
 
 		if err != nil {
-			slog.Error(ErrExecQuery.Error(),
-				slog.String("error", err.Error()))
+			slog.Error(ErrExecQuery.Error() + err.Error())
+
+			errRollback := tx.Rollback(ctx)
+			if errRollback != nil {
+				return errRollback
+			}
 		}
 	}
 
