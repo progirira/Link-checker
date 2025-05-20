@@ -5,12 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"go-progira/internal/application/bot/clients"
+	"go-progira/internal/application/scrapper/api"
 	"go-progira/internal/domain/botmessages"
 	"go-progira/internal/domain/types/scrappertypes"
 	"go-progira/internal/domain/types/telegramtypes"
 	"go-progira/pkg/e"
 	"log/slog"
-	"net/url"
 	"strings"
 )
 
@@ -31,6 +31,13 @@ type Manager struct {
 	States      map[int]State
 	handlers    map[State]StateChange
 	addRequests map[int]*scrappertypes.AddLinkRequest
+}
+
+type URLValidator func(string) bool
+
+var validators = []URLValidator{
+	api.IsGitHubURL,
+	api.IsStackOverflowURL,
 }
 
 func NewManager(tgClient clients.HTTPTelegramClient, scrapClient clients.HTTPScrapperClient) *Manager {
@@ -88,8 +95,13 @@ func (m Manager) HandleAwaitingStart(id int, text string) {
 }
 
 func isValidURL(str string) bool {
-	_, err := url.ParseRequestURI(str)
-	return err == nil
+	for _, validator := range validators {
+		if validator(str) {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (m Manager) processListCommand(id int) {
@@ -157,15 +169,24 @@ func (m Manager) processListByTagCommand(id int, tags []string) {
 	}
 }
 
-func (m Manager) processDeleteTag(id int, tag string) {
-	if tag == "" {
-		errSendMes := m.TgClient.SendMessage(id, botmessages.MsgNoTags)
+func (m Manager) processDeleteTag(id int, given []string) {
+	if len(given) == 0 {
+		errSendMes := m.TgClient.SendMessage(id, botmessages.MsgNoTag)
+		if errSendMes != nil {
+			slog.Error("Error sending message" + errSendMes.Error())
+		}
+
+		return
+	} else if len(given) > 1 {
+		errSendMes := m.TgClient.SendMessage(id, botmessages.MsgTooManyTags)
 		if errSendMes != nil {
 			slog.Error("Error sending message" + errSendMes.Error())
 		}
 
 		return
 	}
+
+	tag := given[0]
 
 	deleteTagRequest := scrappertypes.DeleteTagRequest{Tag: tag}
 
@@ -193,69 +214,89 @@ func (m Manager) handleStart(id int, text string) {
 
 	switch parts[0] {
 	case "/track":
-		if len(parts) == 1 || !isValidURL(parts[1]) {
-			err := m.TgClient.SendMessage(id, botmessages.MsgUnknownCommand)
-			if err != nil {
-				slog.Error("Error sending message" + err.Error())
-			}
-
-			return
-		}
-
-		m.addRequests[id] = &scrappertypes.AddLinkRequest{Link: parts[1]}
-
-		err := m.TgClient.SendMessage(id, botmessages.MsgAddTags)
-		if err != nil {
-			slog.Error("Error sending message" + err.Error())
-
-			return
-		}
-
-		m.States[id] = stateAwaitingTagsForTrack
-
+		m.processTrackCommand(id, parts[1:])
 	case "/untrack":
-		if len(parts) == 1 || !isValidURL(parts[1]) {
-			err := m.TgClient.SendMessage(id, botmessages.MsgUnknownCommand)
-			if err != nil {
-				slog.Error("Error sending message" + err.Error())
-			}
-
-			return
-		}
-
-		delReq := scrappertypes.RemoveLinkRequest{Link: parts[1]}
-
-		err := m.ScrapClient.RemoveLink(int64(id), delReq)
-
-		var msg string
-
-		switch {
-		case err == nil:
-			msg = botmessages.MsgDeleted
-		case errors.Is(err, e.ErrLinkNotFound):
-			msg = botmessages.MsgLinkNotFound
-		default:
-			msg = botmessages.MsgErrDeleteLink
-
-			slog.Error("Error removing link",
-				slog.String("error", err.Error()),
-				slog.String("link", parts[1]))
-		}
-
-		errSendMes := m.TgClient.SendMessage(id, msg)
-		if errSendMes != nil {
-			slog.Error("Error sending message" + errSendMes.Error())
-		}
+		m.processUntrackCommand(id, parts[1:])
 	case "/list":
 		m.processListCommand(id)
 	case "/listbytags":
 		m.processListByTagCommand(id, parts[1:])
 	case "/deletetag":
-		m.processDeleteTag(id, parts[1])
+		m.processDeleteTag(id, parts[1:])
 	case "/help":
 		m.SendHelp(id)
 	default:
 		m.processUnknownCommand(id)
+	}
+}
+
+func (m Manager) processTrackCommand(id int, given []string) {
+	if len(given) == 0 {
+		err := m.TgClient.SendMessage(id, botmessages.MsgGotNoLink)
+		if err != nil {
+			slog.Error("Error sending message" + err.Error())
+		}
+
+		return
+	}
+
+	link := given[0]
+
+	if !isValidURL(link) {
+		err := m.TgClient.SendMessage(id, botmessages.MsgWrongFormatLink)
+		if err != nil {
+			slog.Error("Error sending message" + err.Error())
+		}
+
+		return
+	}
+
+	m.addRequests[id] = &scrappertypes.AddLinkRequest{Link: link}
+
+	err := m.TgClient.SendMessage(id, botmessages.MsgAddTags)
+	if err != nil {
+		slog.Error("Error sending message" + err.Error())
+
+		return
+	}
+
+	m.States[id] = stateAwaitingTagsForTrack
+}
+
+func (m Manager) processUntrackCommand(id int, given []string) {
+	if len(given) == 0 {
+		err := m.TgClient.SendMessage(id, botmessages.MsgGotNoLink)
+		if err != nil {
+			slog.Error("Error sending message" + err.Error())
+		}
+
+		return
+	}
+
+	link := given[0]
+
+	delReq := scrappertypes.RemoveLinkRequest{Link: link}
+
+	err := m.ScrapClient.RemoveLink(int64(id), delReq)
+
+	var msg string
+
+	switch {
+	case err == nil:
+		msg = botmessages.MsgDeleted
+	case errors.Is(err, e.ErrLinkNotFound):
+		msg = botmessages.MsgLinkNotFound
+	default:
+		msg = botmessages.MsgErrDeleteLink
+
+		slog.Error("Error removing link",
+			slog.String("error", err.Error()),
+			slog.String("link", link))
+	}
+
+	errSendMes := m.TgClient.SendMessage(id, msg)
+	if errSendMes != nil {
+		slog.Error("Error sending message" + errSendMes.Error())
 	}
 }
 

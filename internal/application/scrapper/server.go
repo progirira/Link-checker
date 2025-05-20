@@ -38,6 +38,7 @@ func (s *Server) Start(config *config.Config) {
 	http.HandleFunc("/links", s.LinksHandler)
 	http.HandleFunc("/tags", s.TagsHandler)
 	s.startScheduler(config)
+	api.InitUpdaters(config.StackoverflowAPIKey, config.GithubAPIKey)
 
 	slog.Info("Starting scrapper server on",
 		slog.String("address", config.ScrapperHost))
@@ -142,8 +143,6 @@ func (s *Server) monitorLinks(config *config.Config) {
 
 	links, lastID := s.Storage.GetBatchOfLinks(ctx, config.Batch, int64(0))
 
-	api.InitUpdaters(config.StackoverflowAPIKey)
-
 	for len(links) != 0 {
 		chunks := splitIntoChunks(links, config.Workers)
 
@@ -178,7 +177,7 @@ func (s *Server) startScheduler(config *config.Config) {
 
 	sc := gocron.NewScheduler(time.UTC)
 
-	_, err := sc.Every(10).Minutes().Do(func() {
+	_, err := sc.Every(2).Minutes().Do(func() {
 		go s.monitorLinks(config)
 	})
 	if err != nil {
@@ -321,8 +320,6 @@ func (s *Server) GetLinks(w http.ResponseWriter, r *http.Request) {
 func (s *Server) AddLink(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	slog.Info("In add Link in scrapper server")
-
 	chatIDStr := r.URL.Query().Get("Tg-Chat-Id")
 	id, err := strconv.ParseInt(chatIDStr, 10, 64)
 
@@ -333,13 +330,16 @@ func (s *Server) AddLink(w http.ResponseWriter, r *http.Request) {
 
 	var request scrappertypes.AddLinkRequest
 	if errDecode := json.NewDecoder(r.Body).Decode(&request); errDecode != nil {
+		slog.Info("BadRequest on Add Link")
 		http.Error(w, "Invalid request.", http.StatusBadRequest)
+
 		return
 	}
 
 	errAppend := s.Storage.AddLink(ctx, id, request.Link, request.Tags, request.Filters)
 
 	if errors.Is(errAppend, e.ErrLinkAlreadyExists) {
+		slog.Info(e.ErrLinkAlreadyExists.Error())
 		http.Error(w, e.ErrLinkAlreadyExists.Error(), http.StatusConflict)
 
 		return

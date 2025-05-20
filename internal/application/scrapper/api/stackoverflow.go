@@ -10,6 +10,7 @@ import (
 	"log"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -19,10 +20,10 @@ type UpdaterFunc func(url string) (string, error)
 
 var updaters = map[string]Updater{}
 
-func InitUpdaters(stackOverflowKey string) {
+func InitUpdaters(stackOverflowKey, gitHubKey string) {
 	updaters = map[string]Updater{
 		"stackoverflow": &StackoverflowUpdater{Key: stackOverflowKey},
-		"github":        &GithubUpdater{},
+		"github":        &GithubUpdater{Key: gitHubKey},
 	}
 }
 
@@ -46,7 +47,19 @@ type StackoverflowUpdater struct {
 }
 
 func IsStackOverflowURL(url string) bool {
-	return len(url) > 25 && url[:25] == "https://stackoverflow.com"
+	patternAnswers := `^https://stackoverflow\.com/questions/(\d+)/answers$`
+	patternCommits := `^https://stackoverflow\.com/questions/(\d+)/comments$`
+
+	patterns := []string{patternAnswers, patternCommits}
+
+	for _, pattern := range patterns {
+		re := regexp.MustCompile(pattern)
+		if re.MatchString(url) {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (updater *StackoverflowUpdater) GetTitle(questionID int) (string, error) {
@@ -142,9 +155,6 @@ func (updater *StackoverflowUpdater) GetResponse(questionID int, updateType apit
 		return nil, err
 	}
 
-	slog.Info("Get Stackoverflow updates ",
-		slog.Int("Number of Github updates ", len(result.Items)))
-
 	return result.Items, nil
 }
 
@@ -184,7 +194,8 @@ func (updater *StackoverflowUpdater) GetUpdates(link string, prevUpdateTime time
 		lastTime = time.Unix(update.CreatedAt, 0)
 	}
 
-	log.Printf("Get %d comments in GetStackOverflowUpdates", len(updates))
+	slog.Info("Get Stackoverflow updates ",
+		slog.Int("Number of updates ", len(updates)))
 
 	return formatter.FormatMessageForStackOverflow(updates), lastTime
 }
