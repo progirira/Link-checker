@@ -10,14 +10,29 @@ import (
 	"log"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 )
 
-type GithubUpdater struct{}
+type GithubUpdater struct {
+	Key string
+}
 
 func IsGitHubURL(url string) bool {
-	return len(url) >= 18 && url[:18] == "https://github.com"
+	patternPulls := `^https://github\.com/[\w\-]+/[\w\-]+/pulls$`
+	patternIssues := `^https://github\.com/[\w\-]+/[\w\-]+/issues$`
+
+	patterns := []string{patternPulls, patternIssues}
+
+	for _, pattern := range patterns {
+		re := regexp.MustCompile(pattern)
+		if re.MatchString(url) {
+			return true
+		}
+	}
+
+	return false
 }
 
 func GetOwnerAndRepo(link string) (owner, repo string, err error) {
@@ -39,21 +54,20 @@ func GetOwnerAndRepo(link string) (owner, repo string, err error) {
 	return owner, repo, nil
 }
 
-func (updater *GithubUpdater) GetResponse(owner, repo, updateType string, prevUpdateTime time.Time) ([]apitypes.GithubUpdate, error) {
-	log.Println("In GetNewUpdates function")
+func (updater *GithubUpdater) GetResponse(owner, repo string, updateType apitypes.GithubType,
+	prevUpdateTime time.Time) ([]apitypes.GithubUpdate, error) {
+	since := prevUpdateTime.UTC().Format(time.RFC3339)
 
-	urlString := fmt.Sprintf("https://api.github.com/repos/%s/%s/%s", owner, repo, updateType)
+	urlString := fmt.Sprintf("https://api.github.com/search/issues?q=repo:%s/%s+type:%s+updated:>%v",
+		owner, repo, updateType.StringForRequest(), since)
 
-	if !prevUpdateTime.IsZero() {
-		urlString += fmt.Sprintf("?date:>=%v", prevUpdateTime.Format(time.RFC3339))
-	}
+	fmt.Println(urlString)
 
 	req, errMakeReq := http.NewRequest(http.MethodGet, urlString, http.NoBody)
 	if errMakeReq != nil {
 		slog.Error(
 			e.ErrMakeRequest.Error(),
 			slog.String("error", errMakeReq.Error()),
-			slog.String("function", "Github updates"),
 			slog.String("method", http.MethodGet),
 			slog.String("url", urlString),
 		)
@@ -61,12 +75,22 @@ func (updater *GithubUpdater) GetResponse(owner, repo, updateType string, prevUp
 		return []apitypes.GithubUpdate{}, e.ErrMakeRequest
 	}
 
+	req.Header.Set("Authorization", "Bearer "+updater.Key)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("User-Agent", "LinkChecker")
+
 	body, err := doRequest(req)
 	if errors.Is(err, e.ErrAPI) {
 		return []apitypes.GithubUpdate{}, nil
 	}
 
-	var result []apitypes.GithubUpdate
+	if len(body) == 0 {
+		return []apitypes.GithubUpdate{}, nil
+	}
+
+	var result struct {
+		Items []apitypes.GithubUpdate `json:"items"`
+	}
 
 	if errDecode := json.Unmarshal(body, &result); errDecode != nil {
 		slog.Error(
@@ -77,10 +101,7 @@ func (updater *GithubUpdater) GetResponse(owner, repo, updateType string, prevUp
 		return []apitypes.GithubUpdate{}, e.ErrDecodeJSONBody
 	}
 
-	slog.Info("Get Github updates ",
-		slog.Int("Number of Github updates ", len(result)))
-
-	return result, nil
+	return result.Items, nil
 }
 
 func (updater *GithubUpdater) GetUpdates(link string, prevUpdateTime time.Time) (string, time.Time) {
@@ -99,37 +120,52 @@ func (updater *GithubUpdater) GetUpdates(link string, prevUpdateTime time.Time) 
 		return "", prevUpdateTime
 	}
 
-	updateType := parts[5]
-
-	updates, err := updater.GetResponse(owner, repo, updateType, prevUpdateTime)
-	if err != nil {
-		log.Printf("Error getting updates from Github: %s", err.Error())
-		return "", prevUpdateTime
-	}
-
 	var githubType apitypes.GithubType
-
-	lastTime := prevUpdateTime
 
 	switch parts[5] {
 	case "pulls":
 		githubType = apitypes.PR
 	case "issues":
 		githubType = apitypes.Issue
+	default:
+		log.Printf("Unknown update type(not a pullRequest and not an issue): %s", parts[5])
+
+		return "", prevUpdateTime
 	}
 
-	for i, update := range updates {
-		updates[i].Type = githubType
+	updates, err := updater.GetResponse(owner, repo, githubType, prevUpdateTime)
+	if err != nil {
+		log.Printf("Error getting updates from Github: %s", err.Error())
+		return "", prevUpdateTime
+	}
 
-		t, err := time.Parse(time.RFC3339, update.CreatedAt)
+	lastTime := prevUpdateTime
+
+	var filteredUpdates []apitypes.GithubUpdate
+
+	for _, update := range updates {
+		updateTime, err := time.Parse(time.RFC3339, update.CreatedAt)
 		if err != nil {
 			log.Printf("Error parsing time %v for update %s: %s", update.CreatedAt, link, err.Error())
 
 			return "", lastTime
 		}
 
-		lastTime = t
+		updateLocalTime := updateTime.In(time.Local)
+
+		if updateLocalTime.After(prevUpdateTime) {
+			update.Type = githubType
+			update.CreatedAt = updateLocalTime.Format(time.RFC3339)
+			filteredUpdates = append(filteredUpdates, update)
+
+			if updateTime.After(lastTime) {
+				lastTime = updateLocalTime
+			}
+		}
 	}
 
-	return formatter.FormatMessageForGithub(updates), lastTime
+	slog.Info("Get Github updates ",
+		slog.Int("Number of updates ", len(filteredUpdates)))
+
+	return formatter.FormatMessageForGithub(filteredUpdates), lastTime.In(time.Local)
 }

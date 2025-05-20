@@ -18,6 +18,17 @@ func (t GithubType) String() string {
 	}
 }
 
+func (t GithubType) StringForRequest() string {
+	switch t {
+	case PR:
+		return "pr"
+	case Issue:
+		return "issue"
+	default:
+		return ""
+	}
+}
+
 type GithubUpdate struct {
 	Type   GithubType
 	Title  string `json:"title"`

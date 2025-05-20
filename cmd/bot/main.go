@@ -11,7 +11,7 @@ import (
 func main() {
 	pkg.SetNewStdoutLogger()
 
-	appConfig, errLoadEnv := config.LoadConfig(".env")
+	appConfig, errLoadEnv := config.LoadConfig()
 	if errLoadEnv != nil {
 		slog.Error(errLoadEnv.Error(),
 			slog.String("error", errLoadEnv.Error()))

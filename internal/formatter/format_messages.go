@@ -52,14 +52,16 @@ func FormatMessageForGithub(updates []apitypes.GithubUpdate) string {
 			"Новый %s на Github\n\n"+
 				"Название: %s\n"+
 				"Автор: %s\n"+
-				"Время: %s\n\n"+
-				"Превью:\n%s",
+				"Время: %s\n\n",
 			typeText,
 			update.Title,
 			update.Author.Name,
 			update.CreatedAt,
-			preview,
 		)
+
+		if preview != "" {
+			text += fmt.Sprintf("Превью:\n%s\n\n", preview)
+		}
 
 		content.WriteString(text)
 	}

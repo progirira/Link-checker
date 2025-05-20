@@ -1,9 +1,18 @@
 package botmessages
 
 const (
-	MsgUnknownCommand     = "Неизвестная команда. Попробуйте ввести заново!"
-	MsgNoSavedPages       = "Нет отслеживаемых ссылок"
+	MsgUnknownCommand  = "Неизвестная команда. Попробуйте ввести заново!"
+	MsgNoSavedPages    = "Нет отслеживаемых ссылок"
+	MsgGotNoLink       = "Не передано ни одной ссылки"
+	MsgWrongFormatLink = `Вы передали ссылку неверного формата. Ссылки, которые я могу сохранить, имеют вид:
+https://stackoverflow.com/questions/id_of_question/answers
+https://stackoverflow.com/questions/id_of_question/comments
+https://github.com/author/repository/pulls
+https://github.com/author/repository/issues
+`
 	MsgNoTags             = "Не передано ни одного тега"
+	MsgNoTag              = "Не передан тег"
+	MsgTooManyTags        = "Я могу удалять только один тег за раз. Введите команду заново."
 	MsgNoSavedPagesByTag  = "Нет ссылок с таким тегом"
 	MsgNoSavedPagesByTags = "Нет ссылок с такими тегами"
 	MsgTagDeleteFailed    = "Не удалось удалить тег"
